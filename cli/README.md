@@ -31,13 +31,23 @@ touches those.
 | 09 | wait for nodes Ready | yes |
 | 10 | create the `sops-age` Secret | yes |
 | 11 | `helm upgrade --install` ArgoCD from `bootstrap/argocd/values.yaml` | yes |
-| 12 | `kubectl apply` `kubernetes/platform/root.yaml` | yes |
+| 12 | apply the ArgoCD repo credential for github.com/lxup | yes, skipped if absent |
+| 13 | `kubectl apply` `kubernetes/platform/root.yaml` | yes |
 
 Step 10 before 11 is not cosmetic: ArgoCD's repo-server mounts the
 `sops-age` Secret as a volume, and a missing Secret leaves the pod pending
 forever while `helm --wait` times out.
 
-After step 12, nothing here is needed again — ArgoCD watches
+Step 12 before 13 is the same kind of ordering, for a different reason: it
+is what lets ArgoCD clone the repo that step 13 points it at. Putting that
+credential under `kubernetes/` instead would be circular — ArgoCD would
+need to clone the repo to find the credential that lets it clone the repo.
+It runs unconditionally, so flipping these repos to private is a visibility
+toggle on GitHub and nothing else. It is skipped, loudly, if
+`bootstrap/argocd/repo-credentials.sops.yaml` does not exist yet, which is
+only survivable while every repo is public.
+
+After step 13, nothing here is needed again — ArgoCD watches
 `kubernetes/platform/applications/` and picks up every file added there.
 
 ## `tenant`

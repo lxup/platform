@@ -220,6 +220,34 @@ Tenants do **not** share this key. `homelab` keeps its own SOPS setup;
 already cloud-agnostic, which is why moving them off Hetzner needs no
 secret migration at all.
 
+### Git credentials, and staying private-ready
+
+All four repos are public today, so ArgoCD clones them anonymously. That is
+not something to rely on: `bootstrap/argocd/repo-credentials.sops.yaml`
+holds a `repo-creds` credential template for `https://github.com/lxup`
+(URL prefix, so one entry covers this repo *and* `lxup/homelab`, which the
+transitional bridge reads), and CLI step 12 applies it **unconditionally**.
+A Git credential ArgoCD does not need is simply unused — so flipping any of
+these repos to private is a visibility toggle on GitHub and nothing else.
+
+It lives in `bootstrap/` and is applied imperatively, not committed under
+`kubernetes/` as GitOps. The GitOps version is circular: ArgoCD would have
+to clone the repo to find the credential that lets it clone the repo. That
+works while a repo is public and breaks the moment it is not, which is the
+trap the old single-repo arrangement was in — it just never showed, because
+the repo was always public. `paveproject/infra` and `recomendapp/infra`
+already do it the right way, via Infisical; this is the same thing with
+SOPS.
+
+Start from `repo-credentials.example.yaml` next to it. Use a fine-grained
+PAT with Contents: read-only, not the token from `gh auth token`.
+
+**Each tenant needs its own.** `pave` and `recomend` already have one
+(their own ExternalSecret, their own ArgoCD, inside their own vcluster).
+The `homelab` tenant will need one in phase 1 — its ArgoCD reads
+`lxup/homelab`, and this platform credential is not visible from inside a
+vcluster.
+
 Note that `kustomize build` run locally without `ksops` on PATH silently
 skips those generators — the manifests render, the Secrets just are not
 there. That is expected; only ArgoCD has both the binary and the key.

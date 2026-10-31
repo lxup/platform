@@ -22,6 +22,13 @@ export const argocdBootstrapSecretValuesPath = path.join(
   "argocd",
   "values.secret.sops.yaml",
 );
+/** SOPS-encrypted ArgoCD repository credential, applied imperatively (see steps/12). Absent while every repo is public. */
+export const argocdRepoCredentialsPath = path.join(
+  repoRoot,
+  "bootstrap",
+  "argocd",
+  "repo-credentials.sops.yaml",
+);
 export const platformRootAppPath = path.join(repoRoot, "kubernetes", "platform", "root.yaml");
 export const platformApplicationsDir = path.join(repoRoot, "kubernetes", "platform", "applications");
 export const sopsYamlPath = path.join(repoRoot, ".sops.yaml");

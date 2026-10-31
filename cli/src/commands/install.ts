@@ -19,7 +19,8 @@ import { kubeconfigStep } from "../steps/08-kubeconfig.js";
 import { waitNodesReadyStep } from "../steps/09-wait-nodes-ready.js";
 import { sopsSecretStep } from "../steps/10-sops-secret.js";
 import { installArgocdStep } from "../steps/11-install-argocd.js";
-import { applyRootAppStep } from "../steps/12-apply-root-app.js";
+import { argocdRepoCredentialsStep } from "../steps/12-argocd-repo-credentials.js";
+import { applyRootAppStep } from "../steps/13-apply-root-app.js";
 
 const STEPS = [
   loadContextStep,
@@ -36,6 +37,9 @@ const STEPS = [
   // mounts it as a volume, and a missing Secret hangs the pod forever.
   sopsSecretStep,
   installArgocdStep,
+  // Before the root app, not after: this is what lets ArgoCD clone the repo
+  // the root app points at, if these repos ever go private.
+  argocdRepoCredentialsStep,
   applyRootAppStep,
 ];
 
