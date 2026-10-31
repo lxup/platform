@@ -66,11 +66,59 @@ number was a conflation of total project time with service downtime.
    `false`, bridge deleted from the platform repo. Seconds of downtime.
 5. Then `policies.networkPolicy` — see `NETWORK-POLICY.md`.
 
+## Done: steps 1 and 2
+
+The tenant's ArgoCD runs inside the vcluster and has reclaimed
+`argocd.nvlab.fr`.
+
+- `cli/` in lxup/homelab was rewritten as a tenant installer. Half of it
+  went away — no talhelper, no talosctl, no etcd bootstrap — and everything
+  from the `sops-age` Secret onward was left untouched, which is what the
+  layered design was for.
+- Step 03 there refuses to run if the kubeconfig points at the host cluster.
+  The tell is a `longhorn-system` namespace, which a vcluster never sees.
+- The installer ran clean: ArgoCD up in the vcluster, `root` and
+  `argocd-config` both Synced/Healthy.
+- `https://argocd.nvlab.fr/` answers **HTTP 200 from the internet with a
+  valid certificate**, and `/api/version` reports `v3.5.6` — the tenant's
+  instance. `webhook.github.secret` is in `argocd-secret`, so the GitHub
+  webhook is live again.
+- `argocd.nvlab.fr` is back in the DDNS updater's `DOMAINS` and Gatus's
+  check for it is restored.
+
+Measured cost: the tenant's ArgoCD is **~291 Mi** across 7 pods.
+
+### And a ceiling that had to be raised
+
+The vcluster control plane went from **330 Mi** (empty) to **708 Mi** with
+only ArgoCD synced. The syncer's memory tracks the number of objects it
+syncs, not the vcluster's idle size, so the original 1 Gi limit would have
+OOMed partway through migrating nine applications. Now 2 Gi. **Watch
+`kubectl top pod -n homelab` as each app moves in** rather than discovering
+the next ceiling mid-step.
+
+### Known, not yet acted on
+
+`tenant-homelab` reports OutOfSync on its Service, StatefulSet and
+ServiceMonitor. The only substantive difference found is a version-gated
+RBAC rule (`pods/resize`) that ArgoCD's repo-server renders because it knows
+the cluster version and a local `kubectl kustomize` does not — render drift,
+not configuration drift. Harmless while the Application is manual-sync,
+which is its resting state anyway.
+
+It stops being harmless at step 4, when this Application gets
+`automated.selfHeal`: ArgoCD would then fight that drift on a loop. Work out
+whether it needs `ignoreDifferences` **then**, with the real diff from
+`argocd app diff`, rather than guessing at it now.
+
 ## Still unverified
 
 - The per-app data moves themselves. Restoring a Longhorn volume from R2
   into a tenant-side PVC has not been done once.
-- The tenant's ArgoCD running ksops inside a vcluster.
+- **ksops inside the vcluster.** ArgoCD is up and its repo-server has the
+  `sops-age` Secret mounted, but no Application has yet rendered a
+  `*.sops.yaml` through it — the only thing it syncs so far is an Ingress.
+  The first app to migrate will be the real test of that path.
 - Two external-dns instances writing `nvlab.fr` with distinct owner ids
   while both are live. The theory is sound (each only touches records whose
   TXT owner matches) but it has not been watched.
