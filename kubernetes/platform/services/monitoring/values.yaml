@@ -33,17 +33,24 @@ grafana:
     userKey: admin-user
     passwordKey: admin-password
 
+  # No Ingress. The platform runs no ingress controller and no cert-manager
+  # of its own — those are a tenant's business (see the README). Grafana is
+  # reached with:
+  #
+  #   kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80
+  #
+  # This is the one real cost of keeping the platform free of HTTP: grafana.nvlab.fr
+  # stops being a bookmark. Everything else exposed here (ArgoCD #0, Hubble,
+  # the Longhorn UI) is opened a few times a month, where port-forward costs
+  # nothing.
+  #
+  # To put it back you need the full set — an ingress controller, a
+  # cert-manager with a Cloudflare token for DNS-01, and something writing
+  # the DNS record — which is exactly the homelab-flavoured infrastructure
+  # this split moved out of the platform. Decide that deliberately, not by
+  # flipping this flag.
   ingress:
-    enabled: true
-    ingressClassName: traefik
-    annotations:
-      cert-manager.io/cluster-issuer: letsencrypt-production
-    hosts:
-      - grafana.nvlab.fr
-    tls:
-      - secretName: grafana-tls
-        hosts:
-          - grafana.nvlab.fr
+    enabled: false
 
   persistence:
     enabled: true

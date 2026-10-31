@@ -62,11 +62,46 @@ where to draw the line. Current answer:
 | metrics-server | ● | | tenants see node metrics through the syncer |
 | vclusters, quotas, network policies | ● | | this is the definition of a tenant |
 | ArgoCD #0 | ● | | syncs this repo only, never a tenant's workloads |
-| cert-manager + ClusterIssuers | ● | ● | one each; CRDs are isolated per vcluster, so no conflict |
-| Traefik / ingress | ● | ● | platform: admin UIs only. tenant: its own edge |
-| external-dns | ● | ● | one instance per provider per owner — see below |
-| Prometheus / Grafana | ● | ◐ | the seam. See below |
+| Prometheus | ● | ◐ | the seam. See below |
+| **Traefik / ingress** | | ● | |
+| **cert-manager + ClusterIssuers** | | ● | |
+| **external-dns (Cloudflare and UniFi)** | | ● | |
+| **Grafana on a hostname** | | | nobody — port-forward |
 | A tenant's ArgoCD | | ● | one per repo. The whole point |
+
+### The platform exposes no HTTP
+
+That is the rule the bottom half of the table follows from, and it is worth
+stating plainly because an earlier draft of this repo got it wrong.
+
+Nothing about serving HTTP is a platform concern. An ingress controller, a
+cert-manager with a Cloudflare token, something writing DNS records — that
+is one environment's infrastructure, not the machine's. The UniFi API key is
+the clearest case: UniFi is the home router at `10.10.10.1`. `recomend` and
+`pave` will never write a record there. It belongs to `homelab`, full stop.
+
+So each environment owns its own edge:
+
+| | Ingress | Reached how |
+|---|---|---|
+| `homelab` | its Traefik, pinned `10.10.100.200` | the UDM Pro's 80/443 forward — direct, full bandwidth |
+| `recomend` | its own | its own `cloudflared`, dialing out |
+| `pave` | its own | its own `cloudflared`, dialing out |
+| platform | none | `kubectl port-forward` |
+
+`homelab` takes the direct path for a reason: Jellyfin, Immich and Nextcloud
+need real throughput and their uploads exceed Cloudflare's 100MB
+proxied-request cap. `recomend` and `pave` are API and web traffic, where a
+tunnel is strictly better — no open port, no inbound anything, and the home
+WAN IP never appears in their public DNS.
+
+Three ingress controllers, one port-forward on the UDM, and it never has to
+change.
+
+What the platform gives up: `grafana.nvlab.fr` stops being a bookmark.
+ArgoCD #0, Hubble and the Longhorn UI are opened a few times a month, where
+`kubectl port-forward` costs nothing; Grafana is the one that stings. It is
+the whole price of a platform with no HTTP in it, and it is cheap.
 
 ### What a vcluster actually is
 
@@ -96,12 +131,15 @@ allocates for all of them). Pinned assignments:
 
 | Address | Who |
 |---|---|
-| `.200` | whoever owns the UDM Pro's 80/443 forward — platform Traefik today, the `homelab` tenant's Traefik after the migration |
-| `.201` | platform Traefik post-migration (admin UIs, LAN-only) |
+| `.200` | `homelab` tenant's Traefik — the UDM Pro's 80/443 forward |
 | `.210` | `homelab` tenant API server |
 | `.211` | `pave` tenant API server |
 | `.212` | `recomend` tenant API server |
-| `.220+` | tenant ingress controllers, reached through their own Cloudflare Tunnel |
+
+The platform claims nothing from the pool, so `.200` is the `homelab`
+tenant's from the start: no handover to sequence, and the port-forward never
+changes. `pave` and `recomend` need no ingress address at all — their
+`cloudflared` dials out.
 
 Tenant API servers are on a pinned LoadBalancer IP rather than the chart's
 default `localhost:8443`, because the address ends up written inside a
@@ -110,27 +148,30 @@ directly, the way `hetzner-k3s create` used to hand it one.
 
 ### DNS
 
-Two layers, same as before the split, but now one instance per owner:
+The platform writes no DNS records. It has no hostnames to write.
 
-- the platform runs `external-dns-internal` → UniFi local DNS,
-  `txtOwnerId: platform-internal`. It only ever sees Ingresses on the real
-  cluster, i.e. the admin UIs.
-- each tenant runs its own external-dns inside its vcluster, with its own
-  `txtOwnerId`. Two instances writing `nvlab.fr` is safe *because* the
-  owner differs — each deletes only records it owns. **Give every new
-  tenant a distinct owner id** or they will flap each other's records.
+Each tenant runs its own external-dns inside its own vcluster, with its own
+`txtOwnerId`: `homelab` keeps the `homelab-internal` instance that writes
+UniFi local DNS, plus the public Cloudflare DDNS updater; `pave` and
+`recomend` keep their Cloudflare instances. **Give every new tenant a
+distinct owner id** — external-dns tracks ownership with a TXT record
+holding that id and, with `policy: sync`, only ever touches records it
+owns. Two instances in the same zone is safe precisely because the owner
+differs; two sharing an id will flap each other's records.
 
 ### Monitoring: where the seam is
 
-`kubernetes/platform/services/monitoring` is the single ingress-exposed
-Grafana. Its Prometheus sees the physical layer — nodes, Longhorn, Cilium —
-and, because the syncer creates real pods, the raw resource usage of tenant
-pods too.
+`kubernetes/platform/services/monitoring` watches the physical layer —
+nodes, Longhorn, Cilium — and, because the syncer creates real pods, the raw
+resource usage of tenant pods too. Its Grafana has no Ingress, like
+everything else here: reach it with
+`kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80`.
 
 What it cannot see is anything a tenant declares inside its vcluster: a
 `ServiceMonitor` there lives in the tenant's API server and is invisible
 here. So a tenant that wants application dashboards runs a light Prometheus
-of its own and is added here as an extra datasource.
+of its own — and, owning its own ingress and cert-manager, its own Grafana
+on its own hostname if it wants one. This one stays for the physical layer.
 
 Do **not** solve it by letting tenants write ServiceMonitors into the
 platform's namespace. That hands every tenant a write path into the
@@ -237,12 +278,14 @@ needs a credential:
 | Secret | Who needs it |
 |---|---|
 | `talos/talsecret.sops.yaml` | the cluster's own PKI: CA certs, bootstrap tokens |
-| `cert-manager/cloudflare-api-token` | DNS-01 solver, for the admin UIs' certs |
-| `external-dns-internal/unifi-api-key` | writing LAN DNS records into UniFi |
 | `longhorn/backup-target-credentials` | the R2 backup target |
 | `monitoring/grafana-admin` | Grafana's admin password |
 
-None of those belongs to a tenant.
+Three, and none belongs to a tenant. The Cloudflare API token and the UniFi
+API key are **not** here: they serve certificates and DNS records for one
+environment's hostnames, so they live in `lxup/homelab` — where they always
+were. Moving them here would have duplicated a tenant's credentials into
+the thing that runs every tenant.
 
 ### Why SOPS here and Infisical in pave/recomend
 
@@ -338,25 +381,41 @@ The split is phase 0 of four. Nothing is migrated yet.
 
 Done, in commit `184b5cc` there:
 
-1. **`external-dns` and `gatus` moved** from `kubernetes/core/` to
-   `kubernetes/apps/`. The transitional bridge
+1. **`external-dns`, `gatus`, `cert-manager`, `traefik` and
+   `external-dns-internal` moved** from `kubernetes/core/` to
+   `kubernetes/apps/`. The last three are the ones that never belonged on
+   the platform; the move also satisfies a mechanical constraint, since the
+   transitional bridge
    (`kubernetes/platform/applications/zz-transitional-homelab-apps.yaml`)
-   only watches `kubernetes/apps/applications` — anything left under
+   watches `kubernetes/apps/applications` only. Anything left under
    `core/` there stops reconciling once ArgoCD #0 points here instead.
-2. **`argocd.nvlab.fr` removed from the DDNS updater's `DOMAINS`.** The
-   platform ArgoCD is LAN-only at `argocd.platform.nvlab.fr`; the old
-   public hostname is held for the `homelab` tenant's own ArgoCD to claim
-   in phase 1, which is what keeps its GitHub webhook working.
-   `DELETE_ON_STOP` is false there, so the existing Cloudflare record
-   survives and merely goes stale — if the WAN IP changes during the
-   migration window, that one hostname points at nothing until phase 1.
-3. **Gatus's ArgoCD check commented out** for the same window, so it does
+
+   Their final home is that tenant's own `kubernetes/core/`, alongside its
+   own ArgoCD, mirroring `paveproject/infra` and `recomendapp/infra`. That
+   reorganisation happens in phase 1, when the tenant's own ArgoCD owns
+   everything and no cross-repo bridge is involved — it is free there and
+   fiddly now.
+2. **Traefik pins `io.cilium/lb-ipam-ips: 10.10.100.200`** in that repo. It
+   is the ingress that owns the UDM Pro's port-forward, and since the
+   platform claims nothing from the pool, nothing contends for the address.
+3. **`argocd.nvlab.fr` removed from the DDNS updater's `DOMAINS`.** The
+   platform ArgoCD has no Ingress at all now; the hostname is held for the
+   `homelab` tenant's own ArgoCD to claim in phase 1, which is what keeps
+   its GitHub webhook working. `DELETE_ON_STOP` is false there, so the
+   existing Cloudflare record survives and merely goes stale — if the WAN
+   IP changes during the migration window, that one hostname points at
+   nothing until phase 1.
+4. **Gatus's ArgoCD check commented out** for the same window, so it does
    not fire Telegram every minute at a hostname nothing answers. Restore it
    in the same commit that brings up the tenant's ArgoCD ingress.
 
 Still to do, but *after* the switchover is verified, not before: delete
 from `lxup/homelab` what moved here — `talos/`, `bootstrap/`, `cli/` and
-the platform half of `kubernetes/core/`.
+what is left of `kubernetes/core/` there, which is now exactly the platform
+half. That includes its `core/services/argocd/`, whose Ingress served a
+hostname the platform no longer answers on; pruning its Application is
+non-cascading, so delete the orphaned Ingress and the `homelab-repo-creds`
+Secret by hand after the switchover.
 
 ### What is deliberately still wrong
 
@@ -368,9 +427,9 @@ the platform half of `kubernetes/core/`.
   this split removes. It is named `zz-` so it sorts last and stays visibly
   odd. Delete it at the end of phase 1 — but only *after* the tenant-side
   copies are live, because ArgoCD prunes what it created.
-- Platform Traefik is pinned to `.200`, not `.201`. Free it before the
-  `homelab` tenant asks for `.200`, or Cilium hands the tenant a different
-  address and the UDM forward points at the wrong controller.
+- No platform Grafana hostname. `grafana.nvlab.fr` is gone until the
+  `homelab` tenant decides to run its own Grafana, or you decide the
+  platform should serve HTTP after all. Port-forward until then.
 
 ### Verified, and not
 

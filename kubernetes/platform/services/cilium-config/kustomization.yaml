@@ -4,4 +4,6 @@ kind: Kustomization
 resources:
   - ip-pool.yaml
   - l2-policy.yaml
-  - hubble-ingress.yaml
+# No hubble-ingress.yaml: the platform exposes no HTTP at all (see the
+# README). Hubble UI is reached with
+# `kubectl -n kube-system port-forward svc/hubble-ui 8080:80`.

@@ -3,8 +3,8 @@
 # (chicken-and-egg). Re-running `helm upgrade --install` with this file is
 # how you upgrade it later — its own Deployment is deliberately NOT managed
 # by a GitOps Application, so a bad sync can never take down the thing
-# doing the syncing. Only its Ingress lives under
-# kubernetes/platform/services/argocd.
+# doing the syncing. Nothing about it is GitOps-managed at all, in fact:
+# the platform exposes no HTTP, so there is no Ingress either.
 #
 # SCOPE: this instance owns kubernetes/platform/ and kubernetes/tenants/
 # ONLY — the real cluster's infra and the vcluster definitions. It never
@@ -16,8 +16,14 @@
 # the `argocd` namespace before this is applied, or the repo-server pod
 # hangs forever on a missing volume mount (helm's --wait times out). The
 # CLI creates it first for exactly this reason — see src/steps/10-sops-secret.ts.
+# No TLS and no Ingress, deliberately and permanently: the platform runs no
+# ingress controller and no cert-manager — those belong to a tenant (see the
+# README). This UI is reached with
+# `kubectl -n argocd port-forward svc/argocd-server 8080:80`, which is fine
+# for something opened a few times a month, and it means the controller of
+# the entire cluster has no path from the internet at all.
 server:
-  insecure: true # no TLS cert yet on first boot; cert-manager + Ingress take over once kubernetes/platform is live
+  insecure: true
   extraArgs:
     - --insecure
 
@@ -30,13 +36,15 @@ configs:
     #   KRM function (ksops-generator.yaml) to run at all.
     kustomize.buildOptions: "--enable-helm --enable-alpha-plugins --enable-exec"
 
-# No GitHub webhook here, unlike the old single-repo setup: this ArgoCD is
-# LAN-only (see kubernetes/platform/services/argocd/ingress.yaml) so GitHub
-# can't reach it. The platform repo changes rarely — Talos/Cilium/Longhorn
-# bumps, a new tenant — so ArgoCD's default 3-minute polling is plenty, and
-# not punching a hole to the internet for the thing that controls the whole
-# cluster is a straight win. Tenants that want a webhook expose their own
-# ArgoCD themselves.
+# No GitHub webhook here, unlike the old single-repo setup: with no Ingress,
+# GitHub cannot reach this instance. The platform repo changes rarely —
+# Talos/Cilium/Longhorn bumps, a new tenant — so ArgoCD's default 3-minute
+# polling is plenty, and not punching a hole to the internet for the thing
+# that controls the whole cluster is a straight win. Hit Refresh in the UI
+# if you are impatient.
+#
+# Tenants are unaffected: each exposes its own ArgoCD through its own
+# ingress, so the homelab tenant keeps argocd.nvlab.fr and its webhook.
 
 # ksops (https://github.com/viaduct-ai/kustomize-sops) lets `kustomize
 # build` decrypt SOPS-encrypted YAML inline via a `ksops-generator.yaml`
