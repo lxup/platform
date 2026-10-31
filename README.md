@@ -452,13 +452,38 @@ Proven on the real cluster during phase 0:
   reported `application.argoproj.io/root configured`.
 - ArgoCD reads both public repos with no credential at all.
 
-What has **not** been exercised on real hardware:
+Proven in phase 1, with the `homelab` vcluster live:
 
-- **Jellyfin and Immich ML hardware transcoding from inside a vcluster.**
-  The GPU request should be resolved host-side by the device plugin, but
-  this is the one thing to test explicitly in phase 1 before cutting over.
-- The `egressDeny` policies, which have never been applied — no vcluster
-  exists yet.
+- **GPU passthrough into a vcluster works.** A pod created inside the
+  vcluster requesting `gpu.intel.com/i915: 1` was scheduled by the host
+  scheduler onto `elitedesk-03` and came up with the real device:
+
+  ```
+  === /dev/dri ===
+  crw-------  1 root root 226,   1  card1
+  crw-rw-rw-  1 root root 226, 128  renderD128
+  ```
+
+  That is the Intel render node Jellyfin needs for Quick Sync and Immich
+  needs for OpenVINO. This was the single unproven assumption the whole
+  plan rested on.
+- `sync.fromHost.storageClasses` works: `longhorn` shows up as the default
+  StorageClass inside the tenant, so `storageClassName: longhorn` in the
+  app manifests needs no change.
+- `sync.fromHost.nodes` works: the tenant sees the real EliteDesk, with
+  `gpu.intel.com/i915: 1` in its allocatable.
+- The pinned LoadBalancer IP works: the tenant's API server came up on
+  `10.10.100.210` and the exported kubeconfig advertises
+  `https://10.10.100.210:443`, usable directly with no port-forward.
+- `platform tenant` lists the vclusters and exports that kubeconfig.
+- Every application container in `lxup/homelab` already declares both
+  `requests` and `limits`, so none of them will be caught by the quota
+  (audited against the live cluster).
+
+What has still **not** been exercised:
+
+- `policies.networkPolicy` — see `kubernetes/tenants/NETWORK-POLICY.md`.
+  Nothing constrains a tenant at the network layer today.
 - Restoring the 14 Longhorn PVCs from R2 into tenant-side PVCs.
-- Anything about vcluster itself. `tenant-homelab` is deliberately
-  OutOfSync/Missing; phase 1 starts by syncing it.
+- Running an actual application in the vcluster. The vcluster, its CoreDNS
+  and a throwaway GPU pod are all that has run in it so far.
