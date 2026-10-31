@@ -303,6 +303,62 @@ Six done. The remaining ones are ordered by how much an outage is noticed:
 skipped). `nas-passthrough` is last and trivial: an ExternalName Service and
 an Ingress, no data, no pods.
 
+## Step 4: the ingress handover
+
+The last step, and the only one with a cluster-wide outage in it rather than
+a per-app one. Four Applications are still synced onto the real cluster by
+the bridge — `cert-manager`, `traefik`, `external-dns`,
+`external-dns-internal` — and they are what serves every tenant Ingress
+today.
+
+### Why it is not one commit
+
+The naive version moves all four at once, and the outage runs from "old
+Traefik gone" until "new Traefik has .200 **and** the tenant's cert-manager
+has issued eleven certificates" — DNS-01 through Cloudflare takes a minute
+or two each. That is a long time with nothing served.
+
+Split it so the certificates are already issued before the switch:
+
+**4a — cert-manager to the tenant.** Additive and safe. The tenant's
+cert-manager installs its own CRDs and ClusterIssuers inside the vcluster,
+sees the tenant's Ingress objects (which live there), and starts issuing
+certificates into the vcluster. The host's cert-manager keeps serving the
+synced copies meanwhile; different clusters, no conflict. Two cert-managers
+briefly solving DNS-01 for the same names is fine — each ACME order is
+independent and both clean up their `_acme-challenge` records.
+
+**4b — both external-dns instances to the tenant.** Keep
+`txtOwnerId: homelab-internal` rather than inventing a new one: the existing
+UniFi records are owned by that id, and a new owner could not update them.
+The two instances agree on every value while they overlap (same hostnames,
+same `.200`), so the overlap is harmless. The public DDNS updater is keyed
+on hostnames rather than Ingresses, so two of them setting the same records
+to the same WAN IP is a no-op.
+
+**4c — the cutover.** `traefik` to the tenant and
+`sync.toHost.ingresses.enabled: false` in the same commit. The tenant's
+Traefik comes up and sits Pending on `.200`, because the old one still holds
+it — the bridge's prune is non-cascading, so it keeps running. Then
+`kubectl delete namespace traefik cert-manager external-dns
+external-dns-internal` on the host frees the address and the tenant's
+Traefik claims it, with its certificates already in hand from 4a.
+
+Expected outage: the time between deleting the host namespaces and Cilium
+handing `.200` over. Tens of seconds, not minutes.
+
+**4d — delete the bridge.** `zz-transitional-homelab-apps.yaml` from this
+repo, and `sync.toHost.ingresses` stays `false` for good. At that point
+nothing reaches across repos any more and the split is finished.
+
+### Verify after 4c, before 4d
+
+Every hostname, through the real public path and not through the LAN — the
+UDM intercepts port 53, so a `curl https://host/` from a machine at home
+resolves to `.200` and proves nothing about reachability from outside. Use
+`--resolve host:443:90.0.236.76` for the unproxied ones and the Cloudflare
+edge address for the proxied ones, or query over DoH.
+
 ## Still unverified
 
 - **Copying a file volume at scale.** Proven at 176 MB on
