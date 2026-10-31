@@ -359,7 +359,57 @@ resolves to `.200` and proves nothing about reachability from outside. Use
 `--resolve host:443:90.0.236.76` for the unproxied ones and the Cloudflare
 edge address for the proxied ones, or query over DoH.
 
-## Still unverified
+## Done
+
+All ten applications run in the homelab vcluster, and the transitional
+bridge is gone. Final state:
+
+| | |
+|---|---|
+| platform ArgoCD | 6 Applications + 3 tenant definitions |
+| homelab tenant's ArgoCD | **16 Applications, all Synced + Healthy** |
+| LoadBalancer IPs | `.200` Traefik, `.201` syncthing-sync, `.210` API — all the tenant's; the platform claims none |
+| hostnames | 12, verified through the real public path with TLS verifying |
+
+Cutover cost: **41 seconds**, 17:11:46 to 17:12:27, from deleting the four
+host infra namespaces to Cilium handing `.200` over. Per-app outages before
+that ranged from zero (stateless) to about ten minutes (jellyfin's 4.7 GB).
+
+### Data moved
+
+| App | Moved | Verified by |
+|---|---|---|
+| gatus | 148 KB dump | 747 rows in `endpoint_results`, 50 results/endpoint in the API |
+| lxup | nothing | HTTP 200 throughout |
+| antoinequehec | 176 MB + 508 KB dump | 320 files / 182,380,154 bytes exact; a 512 KB JPEG fetched from `uploads` over HTTPS |
+| vaultwarden | 8.4 MB | 261 files / 8,236,968 bytes; md5 identical on `db.sqlite3`, its WAL and `config.json` |
+| syncthing | 155 MB | 94 files / 162,659,336 bytes; `cert.pem` md5 identical, both peers and both folder IDs back |
+| paperless | 21 MB + 17 MB dump | 35 files / 17,661,657 bytes; 20 documents, 20 PDFs on NFS |
+| nextcloud | 44 KB + 113 MB dump | 399,448 rows in `oc_filecache`; `occ status` works, `/Naegativ` external storage listed |
+| immich | 160 MB dump | 8,825 assets, 191 persons; `{"res":"pong"}` |
+| jellyfin | **4.7 GB** | 16,858 files / 4,908,625,593 bytes exact; `jellyfin.db` md5 identical, library watching all four media dirs |
+| nas-passthrough | nothing | HTTP 200 |
+
+**Nothing on the NAS moved.** Photos, documents, media and the Plex library
+are NFS mounts, identical from both sides — several TB the migration never
+touched.
+
+### Everything that was unverified is now verified
+
+- **GPU passthrough** — not a probe: `immich-machine-learning` runs in the
+  vcluster with `gpu.intel.com/i915: 1` and `/dev/dri/renderD128`, and
+  Jellyfin has the same.
+- **ksops in a vcluster** — twice over: an Opaque secret (gatus) and a
+  `dockerconfigjson` the kubelet actually authenticated to ghcr.io with
+  (lxup).
+- **File-volume copies** — proven from 44 KB to 4.7 GB, byte-exact each time.
+- **Two external-dns instances in one zone** — the tenant's instance reports
+  "All records are already up to date" against UniFi.
+- **Isolation, demonstrated by accident** — deleting all six cert-manager
+  CRDs on the host left the tenant's identical CRDs, its two ClusterIssuers
+  and its twelve certificates untouched, with traffic still served.
+
+## Still open
 
 - **Copying a file volume at scale.** Proven at 176 MB on
   `antoinequehec`'s `strapi-data` — byte-identical, and the copied uploads
