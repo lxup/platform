@@ -13,6 +13,11 @@
 # 20 Gi of limits leaves real headroom; 12 Gi of requests is what actually
 # gets reserved against the 45 Gi allocatable.
 #
+# The vcluster control plane itself is a bigger slice of this than it looks:
+# measured at 708 Mi with only this tenant's ArgoCD synced, and its limit was
+# raised to 2 Gi because the syncer grows with the object count it tracks
+# (see values.yaml). Budget for it, not just for the apps.
+#
 # Budget across the machine (48 Gi total, ~45 Gi allocatable):
 #   platform  ~8 Gi   (monitoring, Longhorn, Cilium, apiservers)
 #   homelab   12 Gi   requests  ← this file

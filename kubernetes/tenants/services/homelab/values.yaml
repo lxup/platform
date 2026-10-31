@@ -80,10 +80,23 @@ controlPlane:
         memory: 256Mi
         ephemeral-storage: 1Gi
       limits:
-        # The chart ships 4Gi, sized for clusters far larger than this one.
-        # A vcluster holding ~15 Deployments idles well under 512Mi.
+        # MEASURED, not guessed, and revised upward once already. The syncer's
+        # memory scales with the number of objects it tracks, not with the
+        # vcluster's idle size:
+        #
+        #   empty vcluster (its own CoreDNS only)      330 Mi
+        #   + this tenant's ArgoCD (8 pods)            708 Mi
+        #
+        # The original 1Gi limit was set from the first figure and would have
+        # OOMed somewhere in the middle of migrating the apps — nine of them,
+        # with their Postgres and Redis, is several times the object count
+        # ArgoCD alone added. 2Gi leaves real room; watch
+        # `kubectl top pod -n homelab` as apps move and raise it again rather
+        # than discovering the ceiling during a migration step.
+        #
+        # Still far below the chart's own 4Gi default.
         cpu: "2"
-        memory: 1Gi
+        memory: 2Gi
         ephemeral-storage: 10Gi
 
     persistence:
