@@ -1,10 +1,17 @@
 # Sized against measured reality, not guesswork: the homelab apps
 # (Immich + its ML, Jellyfin, Nextcloud, Paperless, Vaultwarden, Syncthing,
 # antoinequehec, lxup, and their Postgres instances) use ~8 Gi today on the
-# real cluster. On top of that this tenant will carry its own ArgoCD
-# (~1.3 Gi), its own Traefik, its own cert-manager and the vcluster control
-# plane itself (~0.5 Gi). 20 Gi of limits leaves real headroom; 12 Gi of
-# requests is what actually gets reserved against the 45 Gi allocatable.
+# real cluster. On top of that this tenant will carry its own ArgoCD, its
+# own Traefik, its own cert-manager and the vcluster control plane itself.
+#
+# That overhead is smaller than it sounds — measured on the live cluster,
+# the whole argocd namespace (controller + repo-server + server + redis +
+# dex + applicationset + notifications) is 507 Mi, not the ~1.5 Gi the
+# docs' sizing guides imply. Call it ~1.2 Gi for ArgoCD + Traefik +
+# cert-manager + the control plane, per tenant.
+#
+# 20 Gi of limits leaves real headroom; 12 Gi of requests is what actually
+# gets reserved against the 45 Gi allocatable.
 #
 # Budget across the machine (48 Gi total, ~45 Gi allocatable):
 #   platform  ~8 Gi   (monitoring, Longhorn, Cilium, apiservers)

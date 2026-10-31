@@ -177,13 +177,18 @@ in place.
 | | requests | note |
 |---|---|---|
 | platform | ~8 GB | monitoring, Longhorn, Cilium, apiservers |
-| `homelab` | 12 GB | measured at ~8 GB of apps + its own ArgoCD/Traefik/cert-manager |
+| `homelab` | 12 GB | ~8 GB of apps (measured) + ~1.2 GB for its own ArgoCD/Traefik/cert-manager/control plane |
 | `pave` | 4 GB | |
 | `recomend` | 10 GB | |
 | **spare** | **~11 GB** | |
 
 The `requests` quota is the one that protects the other tenants. Raising it
 in one tenant takes memory from another — check this table first.
+
+Per-tenant overhead is cheaper than the sizing guides suggest: the live
+`argocd` namespace (controller, repo-server, server, redis, dex,
+applicationset, notifications) measures **507 Mi**, and a vcluster control
+plane idles under 512 Mi. Four ArgoCD instances cost ~2 GB of the 48.
 
 ## Install
 
