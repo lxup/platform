@@ -1,0 +1,26 @@
+# Advertises the EliteDesks' Intel iGPU (Quick Sync) as the schedulable
+# resource `gpu.intel.com/i915`. Platform-side by nature: a device plugin
+# is a privileged DaemonSet talking to real hardware.
+#
+# A tenant pod that requests gpu.intel.com/i915 gets that request copied
+# onto its host pod by the vcluster syncer, and this plugin serves it. That
+# path is what makes Jellyfin hardware transcoding work from inside a
+# vcluster — verify it explicitly during the homelab tenant migration.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: intel-gpu-plugin
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/lxup/platform.git
+    targetRevision: main
+    path: kubernetes/platform/services/intel-gpu-plugin
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

@@ -1,0 +1,36 @@
+# Talos generated output (contains plaintext certs/keys — never commit)
+talos/clusterconfig/
+talos/clusterconfig.yaml
+talos/talosconfig
+talos/manifests/cilium.generated.yaml
+
+# Cluster kubeconfig fetched by the installer (plaintext)
+kubeconfig
+*.kubeconfig
+
+# Per-tenant kubeconfigs exported from their vcluster by `platform tenant
+# kubeconfig <name>` — plaintext credentials to a tenant's API server.
+tenants/*.kubeconfig
+
+# Any accidentally-decrypted SOPS output
+*.dec.yaml
+*.decrypted.yaml
+
+# Node.js (bootstrap CLI)
+node_modules/
+dist/
+*.log
+.pnpm-store/
+
+# macOS
+.DS_Store
+
+# Local env overrides
+.env
+.env.local
+
+# `kustomize build --enable-helm` unpacks every `helmCharts:` chart into a
+# charts/ directory next to the kustomization.yaml that asked for it.
+# Build artefact, re-downloaded on every render (ArgoCD's repo-server does
+# the same thing in its own workspace) — never source.
+kubernetes/**/charts/

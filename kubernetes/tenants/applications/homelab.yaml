@@ -1,0 +1,35 @@
+# Tenant: homelab — Loup's own apps (Immich, Jellyfin, Nextcloud, Paperless,
+# Vaultwarden, Syncthing, antoinequehec, lxup, nas-passthrough, Gatus).
+#
+# This Application creates the EMPTY cluster and its guardrails, nothing
+# more. What runs inside it comes from lxup/homelab, synced by that repo's
+# own ArgoCD, which lives inside this vcluster. The platform never reads
+# that repo (except through the clearly-marked transitional bridge in
+# ../../platform/applications/zz-transitional-homelab-apps.yaml).
+#
+# Once synced, the tenant's kubeconfig is published by vcluster as the
+# Secret `vc-homelab` in the `homelab` namespace. That Secret is what
+# lxup/homelab's CLI reads in place of its old `talhelper`/`hetzner-k3s`
+# provisioning step.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tenant-homelab
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/lxup/platform.git
+    targetRevision: main
+    path: kubernetes/tenants/services/homelab
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: homelab
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # The vcluster chart brings its own CRDs and a large RBAC surface.
+      - ServerSideApply=true

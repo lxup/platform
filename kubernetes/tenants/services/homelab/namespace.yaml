@@ -1,0 +1,25 @@
+# Host-side namespace for the `homelab` tenant. Everything the tenant's
+# vcluster creates — its control-plane pod and every workload pod its
+# syncer pushes down — lands here, which is what makes the ResourceQuota
+# and the CiliumNetworkPolicy next to this file actually bite.
+#
+# Pod Security "privileged", deliberately. The tenant's own API server
+# enforces its own PSA for the tenant's own namespaces; what reaches THIS
+# namespace is already-admitted pods carrying arbitrary securityContexts,
+# and host-side "baseline" would reject them after the fact — the pod would
+# exist in the vcluster and never appear on a node, which is a miserable
+# failure mode to debug.
+#
+# So PSA is not the tenant boundary here. The boundary is: a separate API
+# server (no access to this cluster's objects), a ResourceQuota (can't eat
+# the machine) and egressDeny rules (can't reach the LAN or the cluster
+# VLAN). Read network-policy.yaml before assuming a tenant is contained.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: homelab
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+    platform.nvlab.fr/tenant: homelab

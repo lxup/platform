@@ -1,0 +1,40 @@
+# LAN-only — deliberately NOT public, unlike the single-ArgoCD setup this
+# replaced. There is no public A record for this hostname (external-dns-internal
+# writes it into UniFi's local DNS only) and the UDM Pro's 80/443 forward
+# points at the tenant ingress, not at the platform one.
+#
+# The trade-off: no GitHub webhook, so a push to lxup/platform is picked up
+# by ArgoCD's 3-minute polling instead of instantly. That is a fine price —
+# this repo changes a few times a month (a Talos bump, a Cilium bump, a new
+# tenant), and not exposing the controller of the entire cluster to the
+# internet is worth far more than 3 minutes. Hit "Refresh" in the UI if
+# you're impatient.
+#
+# The certificate still works without any inbound connectivity: the
+# letsencrypt-production ClusterIssuer solves DNS-01 through the Cloudflare
+# API (see ../cert-manager/cluster-issuer.yaml).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-server
+  namespace: argocd
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    traefik.ingress.kubernetes.io/service.serversscheme: h2c
+spec:
+  tls:
+    - hosts:
+        - argocd.platform.nvlab.fr
+      secretName: argocd-tls
+  rules:
+    - host: argocd.platform.nvlab.fr
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: argocd-server
+                port:
+                  name: http

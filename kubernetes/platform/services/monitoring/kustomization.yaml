@@ -1,0 +1,47 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitoring
+
+resources:
+  - namespace.yaml
+  # kustomize's helm inflator silently drops a chart's crds/ directory
+  # (known limitation, not specific to this chart) — install Prometheus
+  # Operator's CRDs ourselves, pinned to the operator version this chart
+  # ships (v0.94.1 in kube-prometheus-stack 91.8.2).
+  - https://github.com/prometheus-operator/prometheus-operator/releases/download/v0.94.1/stripped-down-crds.yaml
+
+generators:
+  - ksops-generator.yaml
+
+# Dashboard-as-code: the chart's Grafana sidecar (grafana.sidecar.dashboards)
+# auto-discovers any ConfigMap labeled grafana_dashboard=1 in this namespace
+# and loads it — no manual import via the UI, survives a full reinstall.
+configMapGenerator:
+  - name: grafana-dashboard-node-exporter-full
+    files:
+      - dashboards/node-exporter-full.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+  # TRANSITIONAL: dashboards for the homelab *apps*, which still run on the
+  # real cluster. It belongs to the homelab tenant, not to the platform —
+  # move this ConfigMap (and dashboards/homelab-apps.json plus its
+  # generate-homelab-apps.py) into lxup/homelab once that tenant has its own
+  # Prometheus wired in as a datasource. Kept here for now so the Grafana
+  # you open today shows exactly what it showed before the split.
+  - name: grafana-dashboard-homelab-apps
+    files:
+      - dashboards/homelab-apps.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+
+helmCharts:
+  - name: kube-prometheus-stack
+    repo: https://prometheus-community.github.io/helm-charts
+    version: 91.8.2
+    releaseName: kube-prometheus-stack
+    valuesFile: values.yaml

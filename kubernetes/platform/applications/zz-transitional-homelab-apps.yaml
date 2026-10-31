@@ -1,0 +1,49 @@
+# ┌───────────────────────────────────────────────────────────────────────┐
+# │ TRANSITIONAL — delete this file at the end of the homelab migration.  │
+# └───────────────────────────────────────────────────────────────────────┘
+#
+# Until the homelab tenant actually runs in its vcluster, its apps (Immich,
+# Jellyfin, Nextcloud, Paperless, Vaultwarden, Syncthing, antoinequehec,
+# lxup, nas-passthrough, Gatus, the public Cloudflare DDNS updater) still
+# run directly on the real cluster, exactly as they do today. They used to
+# be synced by the single ArgoCD that owned both halves of the old
+# lxup/homelab repo; now that this ArgoCD owns the platform repo instead,
+# something has to keep syncing them in the meantime — this does.
+#
+# It reaches ACROSS repos on purpose, which is precisely the coupling the
+# split exists to remove. That is fine for a migration window and wrong as
+# a steady state. Named zz-* so it sorts last and stays visibly odd.
+#
+# PREREQUISITE in lxup/homelab (see that repo's migration notes): the
+# tenant-side services that still live under kubernetes/core/ there
+# (external-dns, gatus) must move under kubernetes/apps/ first, or this
+# bridge won't pick them up and those two stop reconciling.
+#
+# REMOVAL: once `homelab` the tenant is serving traffic from its vcluster,
+# delete this file. ArgoCD prunes every Application it created, which
+# removes the duplicate copies from the real cluster's namespaces — so do it
+# only AFTER the tenant-side copies are live and verified, never before.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: transitional-homelab-apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "100"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/lxup/homelab.git
+    targetRevision: main
+    path: kubernetes/apps/applications
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

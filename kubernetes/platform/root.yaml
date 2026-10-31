@@ -1,0 +1,28 @@
+# App-of-apps root for the PLATFORM. Applied once, imperatively, by cli/
+# (src/steps/12-apply-root-app.ts) — from then on ArgoCD watches this path
+# itself and every file added under applications/ becomes a new
+# Application, no further manual kubectl apply needed.
+#
+# This is the only Application ever applied by hand on this cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/lxup/platform.git
+    targetRevision: main
+    path: kubernetes/platform/applications
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

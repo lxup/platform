@@ -1,0 +1,31 @@
+# kube-prometheus-stack: Prometheus + Grafana + Alertmanager + node-exporter
+# + kube-state-metrics. Platform-side scope: node CPU/RAM/disk/temperature,
+# cluster capacity, Longhorn and Cilium health — the physical layer.
+#
+# This is the single Grafana for the whole machine. Tenants do not get an
+# ingress-exposed Grafana of their own; a tenant that wants app dashboards
+# runs a light Prometheus in its vcluster and is added here as an extra
+# datasource. See README "Monitoring: where the seam is".
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/lxup/platform.git
+    targetRevision: main
+    path: kubernetes/platform/services/monitoring
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true # huge CRD set (Prometheus Operator) — avoids the 262144-byte annotation limit

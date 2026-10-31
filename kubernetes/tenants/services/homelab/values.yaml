@@ -1,0 +1,122 @@
+# vcluster values for the `homelab` tenant — the virtual cluster that the
+# lxup/homelab repo's own ArgoCD installs into.
+#
+# Deliberately minimal: every key below is one whose default is wrong for
+# this cluster. Everything not mentioned keeps the chart's default, which
+# notably means the backing store stays the embedded one (a single-replica
+# vcluster has no reason to run etcd) and the distro stays the chart's own.
+#
+# Schema reference: `helm show values loft/vcluster --version 0.37.6`.
+# vcluster's value layout changed substantially at 0.20 — do not copy
+# snippets from older blog posts into this file.
+
+sync:
+  fromHost:
+    # Without this the tenant sees no StorageClass at all and every PVC it
+    # creates sits Pending forever. The chart's default is `auto`, which
+    # only turns itself on when the virtual scheduler is in use — it is
+    # not here (the host scheduler places tenant pods), so it must be
+    # explicit. This is what makes `storageClassName: longhorn` work
+    # unchanged inside the tenant.
+    storageClasses:
+      enabled: true
+
+    # Real host nodes instead of the default single fake node.
+    #
+    # Not required for scheduling: tenant pods are placed by the HOST
+    # scheduler, so `gpu.intel.com/i915` (Jellyfin transcoding, Immich ML)
+    # is resolved against the real node and the real device plugin either
+    # way. This is for visibility — `kubectl get nodes` / `kubectl top` /
+    # any dashboard inside the tenant shows the three EliteDesks instead of
+    # a fiction, which matters a lot when debugging why a pod is Pending.
+    #
+    # Safe because syncBackChanges stays at its default `false`: the tenant
+    # can read node labels and taints, never write them.
+    nodes:
+      enabled: true
+      selector:
+        # Only nodes this tenant actually has pods on, not the whole fleet.
+        all: false
+
+  toHost:
+    # Left at the chart default (false) and stated explicitly because it is
+    # the single most consequential choice in this file: the tenant's
+    # Ingress objects stay INSIDE the vcluster, and the tenant runs its own
+    # Traefik to serve them.
+    #
+    # The alternative — syncing Ingresses up to the platform's Traefik —
+    # would work and save ~150Mi, at the cost of the tenant depending on a
+    # platform ingress controller, a platform ingressClass and a platform
+    # cert-manager. That is exactly the coupling this whole split exists to
+    # remove. Each tenant owns its own edge.
+    ingresses:
+      enabled: false
+
+controlPlane:
+  statefulSet:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 1Gi
+      limits:
+        # The chart ships 4Gi, sized for clusters far larger than this one.
+        # A vcluster holding ~15 Deployments idles well under 512Mi.
+        cpu: "2"
+        memory: 1Gi
+        ephemeral-storage: 10Gi
+
+    persistence:
+      volumeClaim:
+        # This PVC holds the tenant's entire control-plane state — every
+        # object its ArgoCD ever created. Lose it and the tenant's cluster
+        # is empty (recoverable, since its repo is the source of truth, but
+        # you would have to re-bootstrap it).
+        enabled: true
+        storageClass: longhorn
+        size: 5Gi
+        # Chart default, restated because it is load-bearing: never let a
+        # `helm uninstall` or an ArgoCD prune take this volume with it.
+        retentionPolicy: Retain
+
+  # The tenant's API server, reachable on the cluster VLAN.
+  #
+  # This matters more than it looks: by default the kubeconfig vcluster
+  # publishes points at https://localhost:8443, which only works through a
+  # `kubectl port-forward` — useless for homelab's own installer CLI, which
+  # expects a plain ./kubeconfig the way `hetzner-k3s create` used to hand
+  # it one. Exposing the API on a pinned LoadBalancer IP and telling
+  # exportKubeConfig to advertise that address makes the exported file work
+  # directly from the LAN/VPN, exactly like the Hetzner endpoint did.
+  #
+  # Pinned, not floating: the address ends up written inside a kubeconfig on
+  # disk, so an IP that changes on reschedule would silently break the
+  # tenant's CLI. See ../../../platform/services/cilium-config/ip-pool.yaml
+  # for the full address plan.
+  service:
+    annotations:
+      io.cilium/lb-ipam-ips: "10.10.100.210"
+    spec:
+      type: LoadBalancer
+
+
+  # The Prometheus Operator CRDs live on the REAL cluster (installed by
+  # kubernetes/platform/services/monitoring), and this chart is rendered by
+  # the platform's ArgoCD into the host — so this ServiceMonitor lands
+  # host-side and the platform Prometheus picks it up.
+  #
+  # Which is the clean half of the monitoring seam: the platform watches
+  # every tenant's control-plane health (API latency, syncer errors,
+  # restarts) without ever seeing inside the tenant's workloads.
+  serviceMonitor:
+    enabled: true
+
+# Make the published kubeconfig usable as-is. vcluster stores it in the
+# Secret `vc-homelab` in the `homelab` namespace at runtime (NOT at Helm
+# install time — it appears once the control plane is actually up).
+# `platform tenant kubeconfig homelab` is what extracts it.
+exportKubeConfig:
+  server: https://10.10.100.210:443
+  # Names the context inside the generated file, so `kubectl config
+  # get-contexts` in homelab's repo is readable rather than a uuid.
+  context: homelab

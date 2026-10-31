@@ -1,0 +1,12 @@
+# Talos's kubelet serving cert isn't signed by a CA metrics-server trusts
+# by default — without this it just sits at 0 metrics forever.
+args:
+  - --kubelet-insecure-tls
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi

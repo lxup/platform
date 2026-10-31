@@ -1,0 +1,92 @@
+# vcluster values for the `recomend` tenant. See ../homelab/values.yaml for the
+# full reasoning on each key — this file differs from it in exactly one
+# place, noted below.
+#
+# Schema reference: `helm show values loft/vcluster --version 0.37.6`.
+
+sync:
+  fromHost:
+    # Required, or every PVC in the tenant sits Pending (the chart default
+    # `auto` only self-enables with the virtual scheduler, which is off).
+    # Replaces the Hetzner CSI StorageClass this project used to get from
+    # hcloud-volumes-patch.
+    storageClasses:
+      enabled: true
+
+    # DIFFERENT FROM THE HOMELAB TENANT: fake node, not the real ones.
+    #
+    # homelab enables real-node sync because it wants node visibility for
+    # GPU debugging. This tenant has no such need, and node names, labels
+    # and capacity are host information it has no reason to read —
+    # and it matters more here than anywhere: this tenant is meant to run the
+    # Actions Runner Controller for a PUBLIC repo, which means CI jobs
+    # proposed by strangers execute in this namespace. Do not hand them a
+    # map of the hardware.
+    #
+    # Nothing is lost for scheduling: tenant pods are placed by the host
+    # scheduler regardless of what the vcluster believes about nodes.
+    nodes:
+      enabled: false
+
+  toHost:
+    # The tenant serves its own Ingresses from its own ingress controller
+    # inside the vcluster. Its public hostnames are reached through its own
+    # Cloudflare Tunnel, so it never needs a port-forward or a slot behind
+    # the platform's Traefik.
+    ingresses:
+      enabled: false
+
+controlPlane:
+  statefulSet:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 1Gi
+      limits:
+        cpu: "2"
+        memory: 1Gi
+        ephemeral-storage: 10Gi
+
+    persistence:
+      volumeClaim:
+        enabled: true
+        storageClass: longhorn
+        size: 10Gi
+        retentionPolicy: Retain
+
+  # The tenant's API server, reachable on the cluster VLAN.
+  #
+  # This matters more than it looks: by default the kubeconfig vcluster
+  # publishes points at https://localhost:8443, which only works through a
+  # `kubectl port-forward` — useless for recomend's own installer CLI, which
+  # expects a plain ./kubeconfig the way `hetzner-k3s create` used to hand
+  # it one. Exposing the API on a pinned LoadBalancer IP and telling
+  # exportKubeConfig to advertise that address makes the exported file work
+  # directly from the LAN/VPN, exactly like the Hetzner endpoint did.
+  #
+  # Pinned, not floating: the address ends up written inside a kubeconfig on
+  # disk, so an IP that changes on reschedule would silently break the
+  # tenant's CLI. See ../../../platform/services/cilium-config/ip-pool.yaml
+  # for the full address plan.
+  service:
+    annotations:
+      io.cilium/lb-ipam-ips: "10.10.100.212"
+    spec:
+      type: LoadBalancer
+
+
+  # Lands host-side, so the platform Prometheus scrapes this tenant's
+  # control-plane health without seeing inside its workloads.
+  serviceMonitor:
+    enabled: true
+
+# Make the published kubeconfig usable as-is. vcluster stores it in the
+# Secret `vc-recomend` in the `recomend` namespace at runtime (NOT at Helm
+# install time — it appears once the control plane is actually up).
+# `platform tenant kubeconfig recomend` is what extracts it.
+exportKubeConfig:
+  server: https://10.10.100.212:443
+  # Names the context inside the generated file, so `kubectl config
+  # get-contexts` in recomend's repo is readable rather than a uuid.
+  context: recomend

@@ -1,0 +1,18 @@
+# Backs up every PVC labeled recurring-job-group.longhorn.io/r2-backup=enabled
+# (grep the repo for that label to see which ones currently opt in — every
+# app's real database/config PVC, never a cache/library-on-NFS one) to the
+# R2 backup target configured in values.yaml. "r2-backup" (not "default")
+# on purpose — a known Longhorn bug causes a deadlock when a RecurringJob
+# uses the group name "default".
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: r2-backup-daily
+  namespace: longhorn-system
+spec:
+  cron: "0 3 * * *" # 03:00 daily — quiet hours
+  task: backup
+  groups:
+    - r2-backup
+  retain: 7
+  concurrency: 2

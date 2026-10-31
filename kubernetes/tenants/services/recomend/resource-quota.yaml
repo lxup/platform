@@ -1,0 +1,18 @@
+# See ../homelab/resource-quota.yaml for the machine-wide memory budget
+# this number was carved out of. Changing requests.memory here takes it
+# from another tenant.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tenant-quota
+  namespace: recomend
+spec:
+  hard:
+    requests.cpu: "6"
+    requests.memory: 10Gi
+    limits.cpu: "20"
+    limits.memory: 16Gi
+    persistentvolumeclaims: "25"
+    requests.storage: 150Gi
+    count/pods: "60"
+    services.loadbalancers: "2"

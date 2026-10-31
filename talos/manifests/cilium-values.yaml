@@ -1,0 +1,61 @@
+# Helm values for the Cilium release that Talos installs automatically at
+# bootstrap (see inlineManifests in ../talconfig.yaml). Rendered to
+# cilium.generated.yaml by `cli/` — do not edit that file by hand.
+#
+# After bootstrap, Cilium is a normal Helm release living in kube-system —
+# upgrade it with `helm upgrade cilium cilium/cilium -n kube-system -f
+# talos/manifests/cilium-values.yaml`, same as any other chart. GitOps does
+# NOT manage the Cilium install itself (chicken-and-egg: ArgoCD needs the
+# CNI to be up before it can run) — only the CiliumLoadBalancerIPPool /
+# L2AnnouncementPolicy config in kubernetes/core/services/cilium-config.
+#
+# Reference: https://docs.cilium.io/en/stable/installation/k8s-install-talos-linux/
+ipam:
+  mode: kubernetes
+
+kubeProxyReplacement: true
+
+# Talos runs KubePrism, a local load-balanced proxy to the apiserver on
+# every node — this is what lets Cilium reach the API without an external
+# LB existing yet.
+k8sServiceHost: localhost
+k8sServicePort: 7445
+
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
+
+# Bare-metal LoadBalancer IPs for Traefik without needing MetalLB — Cilium
+# announces them over L2 (ARP). Pool + policy objects live in
+# kubernetes/core/services/cilium-config, applied once Cilium is up.
+l2announcements:
+  enabled: true
+externalIPs:
+  enabled: true
+
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: true

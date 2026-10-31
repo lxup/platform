@@ -1,0 +1,42 @@
+# Tenant: pave — github.com/paveproject/infra, currently 1x cx23 on Hetzner.
+#
+# ┌──────────────────────────────────────────────────────────────────────┐
+# │ DECLARED BUT NOT ACTIVATED. No `syncPolicy.automated` on purpose:    │
+# │ this Application shows up in the platform ArgoCD as OutOfSync and    │
+# │ creates nothing until someone presses Sync (or runs                  │
+# │ `argocd app sync tenant-pave`).                                 │
+# └──────────────────────────────────────────────────────────────────────┘
+#
+# Second in the migration order, after homelab: it is still in development,
+# so an hour of downtime costs nothing, and it is the smallest surface
+# (api, postgres, redis, rustfs, notify — no CI runners, one node to
+# replace). It is the pattern's real rehearsal for recomend.
+#
+# Activating it is a two-sided operation, in this order:
+#   1. Sync this Application        → empty vcluster + quota + guardrails
+#   2. In that project's own repo, swap its cluster-provisioning step from
+#      `hetzner-k3s create` to reading the `vc-pave` Secret, then run
+#      its installer. Its ArgoCD, ESO/Infisical and apps come up inside.
+#   3. Only once it serves traffic through its own Cloudflare Tunnel:
+#      `hetzner-k3s delete`. Not before — the Hetzner cluster is the
+#      rollback.
+#
+# Give it automated sync once it is live, so it self-heals like the others.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tenant-pave
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/lxup/platform.git
+    targetRevision: main
+    path: kubernetes/tenants/services/pave
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pave
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

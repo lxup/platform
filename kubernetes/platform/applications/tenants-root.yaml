@@ -1,0 +1,38 @@
+# App-of-apps for the TENANTS layer. Dropped into
+# kubernetes/platform/applications/ so the existing platform root picks it
+# up automatically — no separate bootstrap step, same trick the root app
+# itself uses.
+#
+# What lives below it: one vcluster per tenant, plus that tenant's host-side
+# guardrails (namespace, ResourceQuota, CiliumNetworkPolicy). NOT the
+# tenant's workloads — those are synced by the tenant's OWN ArgoCD, running
+# inside its vcluster, against its own repo. The platform hands out an empty
+# cluster and a quota; what goes in it is the tenant's business.
+#
+# Wave 100: after all of kubernetes/platform/ is healthy. A vcluster needs
+# Longhorn (its PVCs), the Cilium IP pool (its LoadBalancer) and
+# cert-manager to already exist.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tenants-root
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "100"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/lxup/platform.git
+    targetRevision: main
+    path: kubernetes/tenants/applications
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,53 @@
+# Guardrails for the `homelab` tenant, written as DENY rules on purpose.
+#
+# Cilium has two ways to do this. A normal `egress:` rule flips the
+# namespace into default-deny for egress, which means enumerating every
+# single thing every app is allowed to reach — Cloudflare, Let's Encrypt,
+# container registries, SMTP, the app's own upstreams — and anything
+# forgotten breaks silently, at 3am, in a way that looks like a DNS
+# problem. `egressDeny` instead subtracts specific destinations from
+# otherwise-normal connectivity: nothing that works today stops working,
+# and the two things that actually matter are closed.
+#
+# Needs Cilium >= 1.14 for deny policies; this cluster runs v1.20.2.
+#
+# What this does NOT do: it does not stop a tenant pod from reaching the
+# internet, and it is not a kernel sandbox — a privileged tenant pod is
+# privileged on the host (see namespace.yaml). It stops a tenant from
+# reaching the home LAN and the cluster's own control plane, which is the
+# realistic failure (a compromised dependency, a CI job from a public repo)
+# rather than the exotic one.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tenant-guardrails
+  namespace: homelab
+spec:
+  # Every pod in the namespace: the vcluster control plane, its CoreDNS,
+  # and every workload pod the syncer creates.
+  endpointSelector: {}
+  egressDeny:
+    # 1. The home LAN — except the NAS, which this tenant legitimately
+    #    needs: Nextcloud, Jellyfin, Immich and Paperless all mount
+    #    nfs://10.10.10.101 directly in their pod specs, and
+    #    nas-passthrough proxies Plex on the same host.
+    #
+    #    Everything else on 10.10.10.0/24 is off limits: the UDM Pro
+    #    (10.10.10.1) and its API, personal laptops, phones, IoT. A tenant
+    #    has no business there.
+    - toCIDRSet:
+        - cidr: 10.10.10.0/24
+          except:
+            - 10.10.10.101/32 # Unraid NAS — NFS + Plex
+    # 2. The cluster VLAN. This is the important one: 10.10.100.2 is the
+    #    Talos control-plane VIP (the real Kubernetes API), .11-.13 are the
+    #    nodes' Talos API, and .200-.250 are every LoadBalancer IP on the
+    #    machine — the platform's ingress and the other tenants'.
+    #
+    #    Pods reach their own vcluster API server over a ClusterIP
+    #    (10.96.0.0/12) and each other over pod CIDR (10.244.0.0/16),
+    #    neither of which is touched here, so nothing legitimate needs this
+    #    range. Denying it means a tenant cannot talk to the host cluster's
+    #    API even if it somehow obtains a credential for it.
+    - toCIDRSet:
+        - cidr: 10.10.100.0/24

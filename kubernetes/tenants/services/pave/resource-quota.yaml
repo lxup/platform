@@ -1,0 +1,18 @@
+# See ../homelab/resource-quota.yaml for the machine-wide memory budget
+# this number was carved out of. Changing requests.memory here takes it
+# from another tenant.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tenant-quota
+  namespace: pave
+spec:
+  hard:
+    requests.cpu: "3"
+    requests.memory: 4Gi
+    limits.cpu: "12"
+    limits.memory: 8Gi
+    persistentvolumeclaims: "15"
+    requests.storage: 80Gi
+    count/pods: "40"
+    services.loadbalancers: "2"

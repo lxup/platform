@@ -1,0 +1,46 @@
+# Tenant: recomend — github.com/recomendapp/infra, currently ~70 EUR/month on Hetzner.
+#
+# ┌──────────────────────────────────────────────────────────────────────┐
+# │ DECLARED BUT NOT ACTIVATED. No `syncPolicy.automated` on purpose:    │
+# │ this Application shows up in the platform ArgoCD as OutOfSync and    │
+# │ creates nothing until someone presses Sync (or runs                  │
+# │ `argocd app sync tenant-recomend`).                                 │
+# └──────────────────────────────────────────────────────────────────────┘
+#
+# LAST in the migration order, and the reason the whole exercise is worth
+# doing. It is in PRODUCTION: do not touch it until the pattern has been
+# proven end-to-end on homelab and then on pave.
+#
+# Two things here that no other tenant has: the Actions Runner Controller
+# (CI jobs from a PUBLIC repo executing in this namespace — see
+# ../services/recomend/values.yaml and the README's security note) and the
+# Android runner pool, which is pure CPU and fits fine on idle EliteDesks.
+#
+# Activating it is a two-sided operation, in this order:
+#   1. Sync this Application        → empty vcluster + quota + guardrails
+#   2. In that project's own repo, swap its cluster-provisioning step from
+#      `hetzner-k3s create` to reading the `vc-recomend` Secret, then run
+#      its installer. Its ArgoCD, ESO/Infisical and apps come up inside.
+#   3. Only once it serves traffic through its own Cloudflare Tunnel:
+#      `hetzner-k3s delete`. Not before — the Hetzner cluster is the
+#      rollback.
+#
+# Give it automated sync once it is live, so it self-heals like the others.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tenant-recomend
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/lxup/platform.git
+    targetRevision: main
+    path: kubernetes/tenants/services/recomend
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: recomend
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

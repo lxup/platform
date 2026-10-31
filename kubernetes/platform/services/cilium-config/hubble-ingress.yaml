@@ -1,0 +1,28 @@
+# Hubble itself (relay + UI) is installed by Talos's inline Cilium
+# manifest, not GitOps-managed — this Ingress just exposes the already-running
+# hubble-ui Service (kube-system) for network-flow / request visibility
+# between pods and services.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hubble-ui
+  namespace: kube-system
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - hubble.nvlab.fr
+      secretName: hubble-ui-tls
+  rules:
+    - host: hubble.nvlab.fr
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hubble-ui
+                port:
+                  number: 80

@@ -1,0 +1,122 @@
+# kube-prometheus-stack: Prometheus + Grafana + Alertmanager + node-exporter
+# (per-node CPU/RAM/disk) + kube-state-metrics (pod/deployment/namespace
+# inventory). Resources sized generously, not minimally — 3 nodes with
+# 16GB each, barely used cluster-wide, no reason to run this stack on the
+# edge of OOM (already happened once with Grafana).
+#
+# PLATFORM SCOPE, and the one place the tenant split has a real seam.
+# This Prometheus sees the physical layer: nodes, Longhorn, Cilium, and —
+# because the vcluster syncer creates real pods in the tenants' host
+# namespaces — the raw resource usage of tenant pods too. What it does NOT
+# see is anything a tenant declares inside its own vcluster: a
+# ServiceMonitor there is invisible here, since the CRD lives in the
+# tenant's API server.
+#
+# So: a tenant that wants application dashboards runs a light Prometheus in
+# its vcluster (short retention, no Alertmanager — this one alerts) and gets
+# added here as an extra Grafana datasource. Do NOT solve it by letting
+# tenants write ServiceMonitors into this namespace; that hands every
+# tenant a write path into the platform and the boundary is gone.
+#
+# This stays the single ingress-exposed Grafana for the whole machine.
+
+# CRDs are installed separately in kustomization.yaml (kustomize doesn't
+# render a chart's crds/ directory) — stops the chart's own CRD-install Job
+# (a Helm hook, meaningless under kustomize rendering) from being applied
+# as a plain resource and erroring out.
+crds:
+  enabled: false
+
+grafana:
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-production
+    hosts:
+      - grafana.nvlab.fr
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - grafana.nvlab.fr
+
+  persistence:
+    enabled: true
+    type: pvc
+    storageClassName: longhorn
+    size: 2Gi
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 2Gi
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
+
+# Talos is the OS, not a kubeadm distro — these kube-controller-manager /
+# kube-scheduler ServiceMonitors target a component endpoint Talos doesn't
+# expose the usual way, they'd just sit permanently "down" in Prometheus.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false # Cilium replaces kube-proxy entirely — nothing to scrape

@@ -1,0 +1,6 @@
+# Talos 1.14 deprecated `cluster.proxy.disabled` (the old v1alpha1 field)
+# in favor of this standalone KubeProxyConfig document — the two are
+# mutually exclusive and Talos refuses a config setting both.
+apiVersion: v1alpha1
+kind: KubeProxyConfig
+enabled: false

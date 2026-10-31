@@ -1,0 +1,22 @@
+# Powers `kubectl top nodes/pods` for quick CLI checks — separate from
+# Prometheus (which also collects this data, but is slower for a one-off
+# "what is using CPU right now" look). Platform-side: a vcluster can see
+# node metrics through the syncer, so tenants do not need their own.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metrics-server
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/lxup/platform.git
+    targetRevision: main
+    path: kubernetes/platform/services/metrics-server
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

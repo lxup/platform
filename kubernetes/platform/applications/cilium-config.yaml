@@ -1,0 +1,27 @@
+# Cilium itself is installed by Talos at first bootstrap via inlineManifests
+# (talos/talconfig.yaml) — this Application only owns the pieces that have
+# to be reconciled afterwards: the LoadBalancer IP pool, the L2 announcement
+# policy, and the Hubble UI Ingress.
+#
+# Wave -20, before everything: Traefik and every tenant ingress controller
+# need the IP pool to exist or their Service sits at <pending> forever.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cilium-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/lxup/platform.git
+    targetRevision: main
+    path: kubernetes/platform/services/cilium-config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

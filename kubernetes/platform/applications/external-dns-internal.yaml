@@ -1,0 +1,30 @@
+# Writes every Ingress hostname into UniFi's own local DNS, so LAN/VPN
+# clients resolve straight to the private LoadBalancer IP without touching
+# Cloudflare — and admin-only hosts (Grafana, Hubble, ArgoCD) never need a
+# public DNS record at all.
+#
+# Platform-side instance, txtOwnerId "platform-internal". It only sees
+# Ingresses that exist on the REAL cluster, i.e. the platform admin UIs:
+# a tenant Ingress lives inside its vcluster and is invisible here, so each
+# tenant runs its own external-dns with its own txtOwnerId. Two instances
+# writing the same zone is fine precisely because the TXT owner differs.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-dns-internal
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/lxup/platform.git
+    targetRevision: main
+    path: kubernetes/platform/services/external-dns-internal
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-dns-internal
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

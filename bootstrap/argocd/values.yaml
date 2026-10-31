@@ -1,0 +1,77 @@
+# One-shot `helm install` values for the PLATFORM ArgoCD ("ArgoCD #0"),
+# applied imperatively by cli/ before GitOps exists to manage anything
+# (chicken-and-egg). Re-running `helm upgrade --install` with this file is
+# how you upgrade it later — its own Deployment is deliberately NOT managed
+# by a GitOps Application, so a bad sync can never take down the thing
+# doing the syncing. Only its Ingress lives under
+# kubernetes/platform/services/argocd.
+#
+# SCOPE: this instance owns kubernetes/platform/ and kubernetes/tenants/
+# ONLY — the real cluster's infra and the vcluster definitions. It never
+# syncs a tenant's workloads: each tenant runs its own ArgoCD *inside* its
+# vcluster, against its own repo. Keep it that way; the moment this
+# instance starts syncing tenant apps, the tenant boundary is gone.
+#
+# IMPORTANT: the `sops-age` Secret this file mounts must already exist in
+# the `argocd` namespace before this is applied, or the repo-server pod
+# hangs forever on a missing volume mount (helm's --wait times out). The
+# CLI creates it first for exactly this reason — see src/steps/10-sops-secret.ts.
+server:
+  insecure: true # no TLS cert yet on first boot; cert-manager + Ingress take over once kubernetes/platform is live
+  extraArgs:
+    - --insecure
+
+configs:
+  cm:
+    # --enable-helm: inflate `helmCharts:` blocks (used by every service
+    #   under kubernetes/platform/services/ and by the vcluster releases
+    #   under kubernetes/tenants/services/).
+    # --enable-alpha-plugins + --enable-exec: required for the ksops exec
+    #   KRM function (ksops-generator.yaml) to run at all.
+    kustomize.buildOptions: "--enable-helm --enable-alpha-plugins --enable-exec"
+
+# No GitHub webhook here, unlike the old single-repo setup: this ArgoCD is
+# LAN-only (see kubernetes/platform/services/argocd/ingress.yaml) so GitHub
+# can't reach it. The platform repo changes rarely — Talos/Cilium/Longhorn
+# bumps, a new tenant — so ArgoCD's default 3-minute polling is plenty, and
+# not punching a hole to the internet for the thing that controls the whole
+# cluster is a straight win. Tenants that want a webhook expose their own
+# ArgoCD themselves.
+
+# ksops (https://github.com/viaduct-ai/kustomize-sops) lets `kustomize
+# build` decrypt SOPS-encrypted YAML inline via a `ksops-generator.yaml`
+# next to the secret, instead of committing cleartext. Only the `ksops`
+# binary is installed onto PATH — NOT `--with-kustomize`, which would
+# replace the repo-server's own kustomize with the one bundled in the
+# ksops image; that one's built against a different `helm` CLI interface
+# than ArgoCD ships and crashes on `helm version -c --short`. The Age
+# *private* key to actually decrypt comes from the `sops-age` Secret (see
+# above), never from this file.
+repoServer:
+  volumes:
+    - name: custom-tools
+      emptyDir: {}
+    - name: sops-age
+      secret:
+        secretName: sops-age
+
+  initContainers:
+    - name: install-ksops
+      image: viaductoss/ksops:v4.5.1
+      command: ["/usr/local/bin/ksops", "install", "/custom-tools"]
+      volumeMounts:
+        - name: custom-tools
+          mountPath: /custom-tools
+
+  volumeMounts:
+    - name: custom-tools
+      mountPath: /usr/local/bin/ksops
+      subPath: ksops
+    - name: sops-age
+      mountPath: /.config/sops/age
+
+  env:
+    - name: XDG_CONFIG_HOME
+      value: /.config
+    - name: SOPS_AGE_KEY_FILE
+      value: /.config/sops/age/keys.txt

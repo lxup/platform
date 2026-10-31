@@ -1,0 +1,29 @@
+# Dedicated cluster VLAN (10.10.100.0/24, see talos/talconfig.yaml) — this
+# is the LoadBalancer range reserved on that VLAN's DHCP (.50-.150), so no
+# collision with DHCP-assigned clients.
+#
+# ONE pool shared by the platform and every tenant: a vcluster's
+# LoadBalancer Service is synced to the host by its syncer, so Cilium
+# allocates from here for all of them. Current plan for the 51 addresses:
+#
+#   10.10.100.200  ingress that owns the UDM Pro's 80/443 forward.
+#                  Platform Traefik today; the homelab tenant's Traefik
+#                  after the migration (see ../traefik/values.yaml).
+#   10.10.100.201  platform Traefik, post-migration (admin UIs, LAN-only)
+#   10.10.100.202+ tenant ingress controllers reached through their own
+#                  Cloudflare Tunnel — these never need a port-forward,
+#                  so they can float; pin them anyway, it makes a
+#                  `kubectl get svc -A` readable.
+#
+# Name kept as "homelab-pool" on purpose, even though the repo is now
+# "platform": renaming a CiliumLoadBalancerIPPool makes ArgoCD prune and
+# recreate it, which reassigns every LoadBalancer IP on the cluster. A
+# cosmetic rename is not worth an ingress outage.
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: homelab-pool
+spec:
+  blocks:
+    - start: 10.10.100.200
+      stop: 10.10.100.250

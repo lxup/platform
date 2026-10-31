@@ -1,0 +1,13 @@
+# Host-side namespace for the `pave` tenant — see the long explanation in
+# ../homelab/namespace.yaml for why PSA is "privileged" here and why that
+# is not the tenant boundary. The boundary is a separate API server, the
+# quota next to this file, and network-policy.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pave
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+    platform.nvlab.fr/tenant: pave

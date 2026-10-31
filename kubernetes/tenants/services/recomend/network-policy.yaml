@@ -1,0 +1,22 @@
+# Guardrails for the `recomend` tenant. Same egressDeny approach as
+# ../homelab/network-policy.yaml (read the rationale there), but STRICTER:
+# this tenant has no business on the home LAN at all, so unlike homelab
+# there is no NAS exception.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tenant-guardrails
+  namespace: recomend
+spec:
+  endpointSelector: {}
+  egressDeny:
+    # The entire home LAN. No exception: this tenant reaches its data
+    # through its own Postgres/object storage inside the vcluster, and
+    # everything external it needs (Infisical, Cloudflare, ghcr.io) is on
+    # the internet, which is not denied here.
+    - toCIDRSet:
+        - cidr: 10.10.10.0/24
+    # The cluster VLAN: Talos API VIP, node APIs, and every LoadBalancer IP
+    # on the machine including the other tenants'.
+    - toCIDRSet:
+        - cidr: 10.10.100.0/24

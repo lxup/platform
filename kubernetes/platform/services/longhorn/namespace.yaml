@@ -1,0 +1,13 @@
+# Longhorn's manager pods need privileged + hostPath (it's a storage
+# driver managing physical disks) — the cluster's default Pod Security
+# admission ("baseline") hard-blocks that. Without this, longhorn-manager
+# pods never get created at all ("forbidden: violates PodSecurity
+# baseline:latest").
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: longhorn-system
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged

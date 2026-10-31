@@ -1,0 +1,136 @@
+# Declarative Talos cluster config, rendered by `talhelper` into per-node
+# machine configs. Source of truth for the 3-node HP EliteDesk cluster.
+#
+# Workflow (all driven by `cli/`, see its README):
+#   talhelper gensecret  -> talos/talsecret.sops.yaml (encrypted, committed)
+#   talhelper genconfig  -> talos/clusterconfig/ (gitignored, has live certs)
+#   talosctl apply-config -> pushes the rendered config to each node
+#
+# Network: dedicated UDM Pro VLAN, 10.10.100.0/24 (your main LAN is
+# 10.10.10.0/24 — this cluster is fully isolated from it).
+#   10.10.100.1        gateway (UDM Pro)
+#   10.10.100.2        control-plane VIP (this is `endpoint` below)
+#   10.10.100.11-.13   the 3 nodes, static
+#   10.10.100.50-.150  Unifi DHCP pool (not used by Talos — everything here is static)
+#   10.10.100.200-.250 Cilium LoadBalancer pool (kubernetes/core/services/cilium-config)
+#
+# IMPORTANT: before first boot, add a static DHCP reservation in the UniFi
+# controller for each node's MAC -> its final IP (.11/.12/.13). Nodes boot
+# into Talos maintenance mode over DHCP; if the lease doesn't already match
+# the static IP declared below, the installer's first `apply-config` call
+# (which targets `node.ipAddress`) won't reach the node.
+#
+# Docs: https://budimanjojo.github.io/talhelper/latest/reference/config/
+---
+clusterName: homelab
+
+# Control-plane VIP — survives any single node going down. See patches
+# below (networkInterfaces.vip) for how each node claims it.
+endpoint: https://10.10.100.2:6443
+
+talosVersion: v1.14.2
+kubernetesVersion: v1.37.1
+
+# All 3 nodes are control-plane + worker (no dedicated worker pool — this is
+# a 3-node homelab, not a datacenter).
+allowSchedulingOnMasters: true
+
+additionalMachineCertSans: &certSans
+  - 10.10.100.11
+  - 10.10.100.12
+  - 10.10.100.13
+  - 10.10.100.2 # VIP
+additionalApiServerCertSans: *certSans
+
+clusterPodNets:
+  - 10.244.0.0/16
+clusterSvcNets:
+  - 10.96.0.0/12
+
+# No default CNI — Cilium is installed at bootstrap via inlineManifests
+# below, and kube-proxy is disabled in favor of Cilium's eBPF replacement
+# (see patches/cluster-proxy-disabled.yaml).
+cniConfig:
+  name: none
+
+# Rendered from talos/manifests/cilium-values.yaml by `cli/` before
+# `talhelper genconfig` runs (`helm template cilium cilium/cilium ... >
+# talos/manifests/cilium.generated.yaml`). Talos only *creates* resources
+# from inline manifests on first bootstrap — it never updates them — so
+# upgrading Cilium later is a normal `helm upgrade` against the live
+# cluster, not a talconfig change.
+inlineManifests:
+  - name: cilium
+    contents: "@./manifests/cilium.generated.yaml"
+    # talhelper envsubst's `@file` contents by default — Hubble UI's
+    # nginx.conf ConfigMap in this manifest legitimately contains `$host`
+    # (an nginx variable, not ours), which talhelper misreads as an unset
+    # shell variable. Skip substitution for this file entirely.
+    skipEnvsubst: true
+
+patches:
+  - "@./patches/cluster-proxy-disabled.yaml"
+
+# Every node has one onboard NIC, so `physical: true` is enough to match it
+# without needing to know the real interface name (check with
+# `talosctl get links -n <ip>` if a node ever has more than one NIC).
+controlPlane:
+  patches:
+    - |-
+      machine:
+        network:
+          interfaces:
+            - deviceSelector:
+                physical: true
+              dhcp: true
+              vip:
+                ip: 10.10.100.2
+
+nodes:
+  - hostname: elitedesk-01
+    ipAddress: 10.10.100.11
+    controlPlane: true
+    installDiskSelector:
+      size: ">= 100GB"
+    nodeLabels:
+      homelab.io/gpu: intel-igpu
+    schematic:
+      customization:
+        systemExtensions:
+          officialExtensions:
+            - siderolabs/intel-ucode
+            - siderolabs/i915
+            - siderolabs/iscsi-tools # required by Longhorn
+            - siderolabs/util-linux-tools # required by Longhorn
+
+  - hostname: elitedesk-02
+    ipAddress: 10.10.100.12
+    controlPlane: true
+    installDiskSelector:
+      size: ">= 100GB"
+    nodeLabels:
+      homelab.io/gpu: intel-igpu
+    schematic:
+      customization:
+        systemExtensions:
+          officialExtensions:
+            - siderolabs/intel-ucode
+            - siderolabs/i915
+            - siderolabs/iscsi-tools # required by Longhorn
+            - siderolabs/util-linux-tools # required by Longhorn
+
+  - hostname: elitedesk-03
+    ipAddress: 10.10.100.13
+    controlPlane: true
+    installDiskSelector:
+      size: ">= 100GB"
+    nodeLabels:
+      homelab.io/gpu: intel-igpu
+    schematic:
+      customization:
+        systemExtensions:
+          officialExtensions:
+            - siderolabs/intel-ucode
+            - siderolabs/i915
+            - siderolabs/iscsi-tools # required by Longhorn
+            - siderolabs/util-linux-tools # required by Longhorn
