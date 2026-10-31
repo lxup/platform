@@ -36,10 +36,33 @@ metadata:
   namespace: homelab
 spec:
   hard:
-    requests.cpu: "8"
-    requests.memory: 12Gi
-    limits.cpu: "24"
-    limits.memory: 20Gi
+    # REQUESTS are the real guardrail — this is what the scheduler reserves,
+    # and what actually stops one tenant starving another. Measured at
+    # 5.4 Gi with seven apps in; 16 Gi leaves room for the rest.
+    requests.cpu: "12"
+    requests.memory: 16Gi
+    # LIMITS are deliberately over-committed, and the original numbers here
+    # were a mistake worth explaining.
+    #
+    # They were set to 24 CPU / 20 Gi on the reasoning that limits are
+    # "headroom above requests". They are not: a ResourceQuota counts
+    # declared limits, not usage, and this tenant's apps declare generous
+    # ones — the monitoring values in this repo even say so out loud. Seven
+    # apps in, the tenant sat at 20394Mi of a 20Gi limits budget, and
+    # immich's four pods were refused outright:
+    #
+    #   Error syncing to host cluster: create object: pods "postgres-…" is
+    #   forbidden: exceeded quota: tenant-quota
+    #
+    # Which surfaces as four Pending pods and a SyncError on the virtual
+    # pod — nothing in `kubectl get pods -n homelab` on the host at all.
+    #
+    # Over-committing limits is the normal posture: they cap a burst, they
+    # do not reserve anything. If every pod burst to its limit at once the
+    # node would evict, which is true of any over-committed cluster and is
+    # what requests exist to bound.
+    limits.cpu: "60"
+    limits.memory: 48Gi
     # Longhorn volumes are real disk on the EliteDesks, replicated x2 — so
     # every Gi claimed here costs 2 Gi of actual storage. 14 PVCs today.
     persistentvolumeclaims: "30"
