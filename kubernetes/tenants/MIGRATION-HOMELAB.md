@@ -203,47 +203,77 @@ fighting ArgoCD's `selfHeal` with `kubectl scale`.
 
 That takes the 4.9 GB of real copying down to mostly `jellyfin-config`.
 
-### Procedure, now that it is proven
+### The overlap is only free for stateless apps
 
-Per app:
+Worth understanding before the procedure, because getting it wrong cost
+`antoinequehec` eight minutes of HTTP 500.
 
-1. **Stop nothing yet.** `git mv kubernetes/apps/applications/<app>.yaml
+While both copies exist, so do two Ingresses for the same host, and Traefik
+picks one. For `lxup` that was harmless: stateless, both copies serving the
+same image, either choice identical. For anything whose **source has to be
+stopped** so its volume can be copied, it is not harmless at all — Traefik
+kept routing `antoinequehec.com` to the stopped copy, whose web pod
+crash-looped nine times against a Strapi at zero replicas.
+
+So the old Ingress has to go as soon as the new copy is up — **before**
+verifying anything, not after. An earlier version of the list below had
+"verify the hostname" ahead of "delete the old namespace", which meant
+verifying the copy that was deliberately down.
+
+### Procedure
+
+**Stateless app** (no volume): steps 1, 2, 6, 7, 8. The overlap is free, so
+there is no hurry and no outage.
+
+**App with a volume**, in this order:
+
+1. **Dump first, stop nothing.** `pg_dump` the database if there is one.
+   Then `git mv kubernetes/apps/applications/<app>.yaml
    kubernetes/core/applications/` and push — `path:` stays pointing at
-   `kubernetes/apps/services/<app>`, which does not move. Add `replicas: 0`
-   in the same commit if the app has a file volume to copy.
+   `kubernetes/apps/services/<app>`, which does not move. Put `replicas: 0`
+   on any deployment that writes to a file volume in the **same** commit.
 2. Refresh both ArgoCDs. The bridge prunes the old Application
    non-cascadingly, so the old pods keep running but are now unmanaged —
    which is what makes step 3 possible without ArgoCD reverting it.
 3. **Outage starts.** Scale the old deployment to 0 on the host.
-4. Copy the data: `pg_dump` for databases, helper-pod `tar` for file
-   volumes.
-5. Second commit restoring `replicas` if step 1 zeroed it. Wait for the new
-   copy, through its CrashLoopBackOff if it has a database.
-6. Verify the hostname answers **and** the data is there — row counts, file
-   counts, not just HTTP 200.
-7. `kubectl delete namespace <app>` on the **host**. This frees the duplicate
-   Ingress and is the point of no return, so do it last.
+4. Copy: `pg_dump`/`psql` for databases, helper-pod `tar` for file volumes.
+   Compare `find | wc -l` and `du -sb` on both sides, not just a human-readable
+   total.
+5. Second commit restoring `replicas`. Wait for the new copy — through its
+   CrashLoopBackOff if it talks to a database, and note that a frontend
+   talking to a backend will do the same thing one layer up.
+6. **`kubectl delete namespace <app>` on the host, as soon as the new pods
+   are Running.** This frees the duplicate Ingress and ends the outage. It
+   is also the point of no return.
+7. Verify — the hostname, and the data. Row counts, file counts, and
+   something that actually reads the copied bytes: for `antoinequehec` that
+   was fetching a 512 KB JPEG out of `uploads` over HTTPS, which proves more
+   than a matching `du`.
 8. Add an `argoAppCheck` line to this tenant's
    `cli/src/commands/status.ts`.
 
-Rolling back is possible up to step 7: `git mv` the file back, and the
-bridge re-adopts the still-running old copy.
+Rolling back is possible up to step 6: `git mv` the file back, scale the old
+deployment up, and the bridge re-adopts the still-running old copy.
 
 ### Order
 
-`gatus` ✅ · `lxup` · `antoinequehec` · `vaultwarden` · `syncthing` ·
+`gatus` ✅ · `lxup` ✅ · `antoinequehec` ✅ · `vaultwarden` · `syncthing` ·
 `paperless` · `nextcloud` · `immich` · `jellyfin` · `nas-passthrough`
 
-`lxup` is next because it has no volume at all — a web deployment and a ghcr
-pull secret — so it exercises the move with nothing to copy.
-`nas-passthrough` is last and trivial: an ExternalName Service and an
-Ingress, no data, no pods.
+Three done. The remaining ones are ordered by how much an outage is noticed:
+`vaultwarden` (8.4 MB) and `syncthing` (155 MB) are small and personal,
+`paperless` (21 MB + 17 MB DB) next, then the three that matter —
+`nextcloud` (259 MB DB + 44 KB config), `immich` (DB only, library on NFS,
+`model-cache` skipped) and `jellyfin` (4.7 GB config, `jellyfin-cache`
+skipped). `nas-passthrough` is last and trivial: an ExternalName Service and
+an Ingress, no data, no pods.
 
 ## Still unverified
 
-- **Copying a file volume.** Gatus's data moved by `pg_dump`, which says
-  nothing about the helper-pod `tar` path above. `vaultwarden-data` at 8.4 MB
-  is the cheapest place to prove it before `jellyfin-config` at 4.7 GB.
+- **Copying a file volume at scale.** Proven at 176 MB on
+  `antoinequehec`'s `strapi-data` — byte-identical, and the copied uploads
+  verified served over HTTPS. `jellyfin-config` is 4.7 GB, 27× that, and the
+  only thing left that might behave differently is the time it takes.
 - **An application that actually needs the GPU.** The probe proved the
   device reaches a vcluster pod; Jellyfin transcoding and Immich ML through
   it have not been exercised.
