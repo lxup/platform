@@ -49,8 +49,28 @@ sync:
     # platform ingress controller, a platform ingressClass and a platform
     # cert-manager. That is exactly the coupling this whole split exists to
     # remove. Each tenant owns its own edge.
+    #
+    # ┌──────────────────────────────────────────────────────────────────┐
+    # │ TEMPORARILY true, for the migration window only.                 │
+    # │                                                                  │
+    # │ The UDM Pro forwards 80/443 to one IP, 10.10.100.200, and only   │
+    # │ one Traefik can hold it. With ingresses staying virtual, an app  │
+    # │ moved into this vcluster would be served by a Traefik with no    │
+    # │ public address — so every app would have to move in a single     │
+    # │ window, all down at once.                                        │
+    # │                                                                  │
+    # │ Syncing them to the host instead means the EXISTING Traefik on   │
+    # │ .200 serves them, so apps migrate one at a time, each with its   │
+    # │ own few-minute outage, verified before the next one. The tenant's │
+    # │ own Traefik and the .200 handover become the last step, measured │
+    # │ in seconds.                                                      │
+    # │                                                                  │
+    # │ Set this back to false in the same commit that brings up the     │
+    # │ tenant's Traefik. Leaving it true in the steady state is the     │
+    # │ coupling this whole split exists to remove.                      │
+    # └──────────────────────────────────────────────────────────────────┘
     ingresses:
-      enabled: false
+      enabled: true
 
 controlPlane:
   statefulSet:
