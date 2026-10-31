@@ -135,6 +135,40 @@ while ksops was unproven. Deleting the old namespace left the vcluster
 copies alone — they live in the host's `homelab` namespace as
 `gatus-...-x-gatus-x-homelab`.
 
+### Two things that bit on paperless
+
+**Delete the helper pods and WAIT.** `kubectl delete pod --wait=false` on
+`copy-in` left it holding the Longhorn PVC, and Longhorn volumes are RWO —
+so the app could not start:
+
+```
+Waiting for detach for volume "pvc-53e444ea-…"
+Volume is already used by pod(s) copy-in-x-paperless-x-homelab
+```
+
+Drop the `--wait=false`, or confirm the pod is gone before restoring
+`replicas`.
+
+**A stale NFS handle on the node.** The real blocker, and a known failure
+mode in this homelab — `lxup/homelab`'s history has a commit saying as much
+("a livenessProbe does not heal a stale NFS mount"). Paperless came up with
+`PAPERLESS_MEDIA_ROOT is set but doesn't exist`, and the container runtime
+underneath said why:
+
+```
+failed to apply OCI options: failed to stat
+"/var/lib/kubelet/pods/…/volumes/kubernetes.io~nfs/media": stale file handle
+```
+
+Nothing to do with the vcluster: the kubelet on `elitedesk-03` held a stale
+mount for `/mnt/user/paperless`. **Deleting the pod fixed it** — the kubelet
+unmounted and remounted cleanly on recreation. If it recurs and a pod delete
+does not clear it, the node's mount has to be cleared directly.
+
+Every app that mounts the NAS (`nextcloud`, `immich`, `jellyfin`,
+`nas-passthrough`) can hit this on first start in the vcluster. Delete the
+pod once before looking for anything more complicated.
+
 ### Expect this again
 
 Gatus panicked three times on startup:
@@ -257,10 +291,11 @@ deployment up, and the bridge re-adopts the still-running old copy.
 
 ### Order
 
-`gatus` ✅ · `lxup` ✅ · `antoinequehec` ✅ · `vaultwarden` · `syncthing` ·
-`paperless` · `nextcloud` · `immich` · `jellyfin` · `nas-passthrough`
+`gatus` ✅ · `lxup` ✅ · `antoinequehec` ✅ · `vaultwarden` ✅ ·
+`syncthing` ✅ · `paperless` ✅ · `nextcloud` · `immich` · `jellyfin` ·
+`nas-passthrough`
 
-Three done. The remaining ones are ordered by how much an outage is noticed:
+Six done. The remaining ones are ordered by how much an outage is noticed:
 `vaultwarden` (8.4 MB) and `syncthing` (155 MB) are small and personal,
 `paperless` (21 MB + 17 MB DB) next, then the three that matter —
 `nextcloud` (259 MB DB + 44 KB config), `immich` (DB only, library on NFS,
