@@ -228,7 +228,7 @@ there. That is expected; only ArgoCD has both the binary and the key.
 
 The split is phase 0 of four. Nothing is migrated yet.
 
-- [x] **Phase 0** — this repo exists; ArgoCD #0 switches from
+- [~] **Phase 0** — this repo exists; ArgoCD #0 switches from
       `lxup/homelab:kubernetes/core` to `lxup/platform:kubernetes/platform`.
       The real cluster's state is unchanged: same resource names, same
       namespaces, so ArgoCD adopts rather than recreates.
@@ -239,23 +239,29 @@ The split is phase 0 of four. Nothing is migrated yet.
 - [ ] **Phase 3** — `recomend`. Production, and the ~70 €/month this was
       all for. Last.
 
-### Phase 0 is not self-contained
+### Companion changes in lxup/homelab
 
-Two things in `lxup/homelab` have to move for phase 0 to actually work:
+Done, in commit `184b5cc` there:
 
-1. **`external-dns` and `gatus` must move** from `kubernetes/core/` to
-   `kubernetes/apps/` there. The transitional bridge
+1. **`external-dns` and `gatus` moved** from `kubernetes/core/` to
+   `kubernetes/apps/`. The transitional bridge
    (`kubernetes/platform/applications/zz-transitional-homelab-apps.yaml`)
    only watches `kubernetes/apps/applications` — anything left under
-   `core/` stops reconciling the moment ArgoCD #0 points here instead.
-2. **`argocd.nvlab.fr` must come out of the DDNS updater's `DOMAINS`**.
-   The platform ArgoCD is now LAN-only at `argocd.platform.nvlab.fr`; the
-   old public hostname is left free for the `homelab` tenant's own ArgoCD
-   to claim in phase 1, which is also what keeps its GitHub webhook
-   working.
+   `core/` there stops reconciling once ArgoCD #0 points here instead.
+2. **`argocd.nvlab.fr` removed from the DDNS updater's `DOMAINS`.** The
+   platform ArgoCD is LAN-only at `argocd.platform.nvlab.fr`; the old
+   public hostname is held for the `homelab` tenant's own ArgoCD to claim
+   in phase 1, which is what keeps its GitHub webhook working.
+   `DELETE_ON_STOP` is false there, so the existing Cloudflare record
+   survives and merely goes stale — if the WAN IP changes during the
+   migration window, that one hostname points at nothing until phase 1.
+3. **Gatus's ArgoCD check commented out** for the same window, so it does
+   not fire Telegram every minute at a hostname nothing answers. Restore it
+   in the same commit that brings up the tenant's ArgoCD ingress.
 
-After that, delete from `lxup/homelab` what moved here: `talos/`,
-`bootstrap/`, `cli/` and the platform half of `kubernetes/core/`.
+Still to do, but *after* the switchover is verified, not before: delete
+from `lxup/homelab` what moved here — `talos/`, `bootstrap/`, `cli/` and
+the platform half of `kubernetes/core/`.
 
 ### What is deliberately still wrong
 

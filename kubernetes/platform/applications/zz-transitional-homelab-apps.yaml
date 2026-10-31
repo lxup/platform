@@ -14,10 +14,11 @@
 # split exists to remove. That is fine for a migration window and wrong as
 # a steady state. Named zz-* so it sorts last and stays visibly odd.
 #
-# PREREQUISITE in lxup/homelab (see that repo's migration notes): the
-# tenant-side services that still live under kubernetes/core/ there
-# (external-dns, gatus) must move under kubernetes/apps/ first, or this
-# bridge won't pick them up and those two stop reconciling.
+# The prerequisite is done: lxup/homelab commit 184b5cc moved external-dns
+# and gatus from kubernetes/core/ to kubernetes/apps/, so everything this
+# tenant still runs on the real cluster is under the one path below. If you
+# ever add something to kubernetes/core/ in that repo during the migration
+# window, it will NOT reconcile — put it under kubernetes/apps/.
 #
 # REMOVAL: once `homelab` the tenant is serving traffic from its vcluster,
 # delete this file. ArgoCD prunes every Application it created, which
