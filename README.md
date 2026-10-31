@@ -365,10 +365,13 @@ there. That is expected; only ArgoCD has both the binary and the key.
 
 The split is phase 0 of four. Nothing is migrated yet.
 
-- [~] **Phase 0** — this repo exists; ArgoCD #0 switches from
-      `lxup/homelab:kubernetes/core` to `lxup/platform:kubernetes/platform`.
-      The real cluster's state is unchanged: same resource names, same
-      namespaces, so ArgoCD adopts rather than recreates.
+- [x] **Phase 0** — done. ArgoCD #0 now syncs
+      `lxup/platform:kubernetes/platform`. The cluster came through it
+      unchanged: 17 PVCs byte-identical, 97 pods before and after with none
+      unhealthy, 22 Applications Synced+Healthy, Traefik still on
+      `10.10.100.200`, and jellyfin/cloud/immich.nvlab.fr still answering
+      end-to-end over the internet. Three Ingresses went away as intended
+      (`grafana.nvlab.fr`, `hubble.nvlab.fr`, `argocd.nvlab.fr`).
 - [ ] **Phase 1** — `homelab` becomes a tenant. Riskiest for data, so it
       goes first *only* because it is the one whose downtime costs nothing
       but convenience. Includes giving that tenant its own Age key (see
@@ -435,10 +438,27 @@ Secret by hand after the switchover.
 
 `helm template` and `kustomize build` pass on every service and every
 tenant, and every Application validates against the live cluster's schema.
+
+Proven on the real cluster during phase 0:
+
+- **Pruning an Application is non-cascading here.** No Application carries
+  `resources-finalizer.argocd.argoproj.io`, and when five of them
+  (cert-manager, traefik, external-dns-internal, external-dns, gatus)
+  changed owner from `root` to `apps-root`, every underlying resource kept
+  running and was re-adopted — 17 PVCs intact, 12 certificates still Ready,
+  Traefik's LoadBalancer IP unchanged. This is the mechanism the whole
+  migration leans on, and it is no longer a theory.
+- Switching the root app is an update, not a recreate: `kubectl apply`
+  reported `application.argoproj.io/root configured`.
+- ArgoCD reads both public repos with no credential at all.
+
 What has **not** been exercised on real hardware:
 
 - **Jellyfin and Immich ML hardware transcoding from inside a vcluster.**
   The GPU request should be resolved host-side by the device plugin, but
   this is the one thing to test explicitly in phase 1 before cutting over.
-- The `egressDeny` policies, which have never been applied.
+- The `egressDeny` policies, which have never been applied — no vcluster
+  exists yet.
 - Restoring the 14 Longhorn PVCs from R2 into tenant-side PVCs.
+- Anything about vcluster itself. `tenant-homelab` is deliberately
+  OutOfSync/Missing; phase 1 starts by syncing it.
