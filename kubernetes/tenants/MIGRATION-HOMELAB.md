@@ -111,14 +111,71 @@ It stops being harmless at step 4, when this Application gets
 whether it needs `ignoreDifferences` **then**, with the real diff from
 `argocd app diff`, rather than guessing at it now.
 
+## Done: step 3, first app
+
+`gatus` lives in the vcluster. Picked for what it exercised, not for its
+importance.
+
+**ksops works inside a vcluster** — the last open unknown. `db-credentials`
+rendered decrypted, `POSTGRES_PASSWORD` 32 bytes of real content rather than
+`ENC[...]`.
+
+**The data moved intact.** 148 KB dump taken before anything was touched,
+restored after: 747 `endpoint_results`, 639 `endpoint_uptimes`, 103
+`endpoint_events`. `status.nvlab.fr` answers HTTP 200 and its API reports 50
+results per endpoint — the restored history, not the handful a fresh
+instance would show.
+
+**The mechanism behaved as designed.** The bridge pruned the Application
+when its file moved; the prune was non-cascading, so the old copy kept
+running while the new one came up. Two Gatus and two Ingresses for
+status.nvlab.fr for a few minutes, which is exactly what bought a rollback
+while ksops was unproven. Deleting the old namespace left the vcluster
+copies alone — they live in the host's `homelab` namespace as
+`gatus-...-x-gatus-x-homelab`.
+
+### Expect this again
+
+Gatus panicked three times on startup:
+
+```
+panic: dial tcp 10.110.47.64:5432: connect: no route to host
+```
+
+Postgres was already accepting connections; the Service endpoints had not
+been programmed yet, and gatus exits rather than retrying. It recovered by
+itself after three restarts. **Every app with a database dependency will
+probably do something similar on its first sync — CrashLoopBackOff for the
+first minute is not a failure.** Wait before diagnosing.
+
+### Procedure, now that it is proven
+
+Per app, in this order:
+
+1. `pg_dump` (or note that there is nothing to move) **before touching
+   anything**
+2. `git mv kubernetes/apps/applications/<app>.yaml kubernetes/core/applications/`
+   and push — `path:` stays pointing at `kubernetes/apps/services/<app>`
+3. refresh both ArgoCDs; wait for the new copy to come up in the vcluster,
+   through its CrashLoopBackOff if it has a database
+4. restore the dump
+5. verify the hostname answers and the data is there
+6. `kubectl delete namespace <app>` on the **host**, which frees the
+   duplicate Ingress
+7. add an `argoAppCheck` line to this tenant's `cli/src/commands/status.ts`
+
+Remaining, roughly by increasing risk: `antoinequehec`, `lxup`,
+`vaultwarden`, `syncthing`, `paperless`, `nextcloud`, `immich`, `jellyfin`,
+`nas-passthrough`.
+
 ## Still unverified
 
-- The per-app data moves themselves. Restoring a Longhorn volume from R2
-  into a tenant-side PVC has not been done once.
-- **ksops inside the vcluster.** ArgoCD is up and its repo-server has the
-  `sops-age` Secret mounted, but no Application has yet rendered a
-  `*.sops.yaml` through it — the only thing it syncs so far is an Ingress.
-  The first app to migrate will be the real test of that path.
+- **Restoring a Longhorn volume from R2.** Gatus's data moved by `pg_dump`
+  and `psql`, which is the right tool for a database and the wrong one for
+  `jellyfin-config` — 4.7 GB of files, no database. That path is untried.
+- **An application that actually needs the GPU.** The probe proved the
+  device reaches a vcluster pod; Jellyfin transcoding and Immich ML through
+  it have not been exercised.
 - Two external-dns instances writing `nvlab.fr` with distinct owner ids
   while both are live. The theory is sound (each only touches records whose
   TXT owner matches) but it has not been watched.
