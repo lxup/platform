@@ -16,7 +16,25 @@ spec:
     # the internet, which is not denied here.
     - toCIDRSet:
         - cidr: 10.10.10.0/24
-    # The cluster VLAN: Talos API VIP, node APIs, and every LoadBalancer IP
-    # on the machine including the other tenants'.
+    # 2. The cluster VLAN: 10.10.100.2 is the Talos control-plane VIP,
+    #    .11-.13 are the nodes' Talos API, and .200-.250 is every
+    #    LoadBalancer IP on the machine — the platform's ingress and the
+    #    other tenants'.
     - toCIDRSet:
         - cidr: 10.10.100.0/24
+    # 3. The host cluster's API server, by Cilium identity rather than by
+    #    address. Needed because rule 2 is NOT enough on its own: the
+    #    Service CIDR is 10.96.0.0/12 and the host apiserver answers on
+    #    10.96.0.1, which rule 2 never touches. That CIDR cannot simply be
+    #    denied wholesale — this tenant's own vcluster API and its own
+    #    CoreDNS are ClusterIPs in the same range.
+    #
+    #    STILL OPEN, and deliberately not guessed at: every other ClusterIP
+    #    on the host stays reachable from here, including the platform's
+    #    Grafana, Prometheus and the Longhorn UI. Closing that needs a
+    #    toEndpoints deny on the platform namespaces with an exception for
+    #    DNS, and getting it wrong breaks name resolution for the whole
+    #    tenant. Validate it against Hubble on a live vcluster in phase 1
+    #    before adding it — not from a README.
+    - toEntities:
+        - kube-apiserver

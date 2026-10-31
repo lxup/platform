@@ -39,15 +39,25 @@ spec:
         - cidr: 10.10.10.0/24
           except:
             - 10.10.10.101/32 # Unraid NAS — NFS + Plex
-    # 2. The cluster VLAN. This is the important one: 10.10.100.2 is the
-    #    Talos control-plane VIP (the real Kubernetes API), .11-.13 are the
-    #    nodes' Talos API, and .200-.250 are every LoadBalancer IP on the
-    #    machine — the platform's ingress and the other tenants'.
-    #
-    #    Pods reach their own vcluster API server over a ClusterIP
-    #    (10.96.0.0/12) and each other over pod CIDR (10.244.0.0/16),
-    #    neither of which is touched here, so nothing legitimate needs this
-    #    range. Denying it means a tenant cannot talk to the host cluster's
-    #    API even if it somehow obtains a credential for it.
+    # 2. The cluster VLAN: 10.10.100.2 is the Talos control-plane VIP,
+    #    .11-.13 are the nodes' Talos API, and .200-.250 is every
+    #    LoadBalancer IP on the machine — the platform's ingress and the
+    #    other tenants'.
     - toCIDRSet:
         - cidr: 10.10.100.0/24
+    # 3. The host cluster's API server, by Cilium identity rather than by
+    #    address. Needed because rule 2 is NOT enough on its own: the
+    #    Service CIDR is 10.96.0.0/12 and the host apiserver answers on
+    #    10.96.0.1, which rule 2 never touches. That CIDR cannot simply be
+    #    denied wholesale — this tenant's own vcluster API and its own
+    #    CoreDNS are ClusterIPs in the same range.
+    #
+    #    STILL OPEN, and deliberately not guessed at: every other ClusterIP
+    #    on the host stays reachable from here, including the platform's
+    #    Grafana, Prometheus and the Longhorn UI. Closing that needs a
+    #    toEndpoints deny on the platform namespaces with an exception for
+    #    DNS, and getting it wrong breaks name resolution for the whole
+    #    tenant. Validate it against Hubble on a live vcluster in phase 1
+    #    before adding it — not from a README.
+    - toEntities:
+        - kube-apiserver

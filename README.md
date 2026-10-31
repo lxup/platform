@@ -154,9 +154,23 @@ The real guardrails are:
 - a separate API server per tenant;
 - a `ResourceQuota` on the host namespace, where the syncer creates pods —
   so it bites;
-- `CiliumNetworkPolicy` with `egressDeny` on `10.10.10.0/24` (the home LAN)
-  and `10.10.100.0/24` (the Talos API VIP, the node APIs, every
-  LoadBalancer IP on the machine).
+- `CiliumNetworkPolicy` with `egressDeny` on `10.10.10.0/24` (the home LAN,
+  minus the NAS for `homelab`), `10.10.100.0/24` (the Talos API VIP, the
+  node APIs, every LoadBalancer IP on the machine) and the `kube-apiserver`
+  entity.
+
+**And one hole that is still open.** Those CIDR denials do not cover the
+Service CIDR, `10.96.0.0/12`, so every other ClusterIP on the host stays
+reachable from inside a tenant — the platform's Grafana, Prometheus and the
+Longhorn UI among them. The host apiserver itself is closed by the
+`kube-apiserver` entity rule, but the rest is not.
+
+It cannot be fixed by denying `10.96.0.0/12` wholesale: a tenant's own
+vcluster API and its own CoreDNS are ClusterIPs in that same range. The
+real fix is a `toEndpoints` deny on the platform's namespaces with an
+explicit exception for DNS, and getting that wrong takes name resolution
+down for the whole tenant. It belongs in phase 1, validated against Hubble
+on a live vcluster — not written from a README.
 
 `egressDeny` rather than a default-deny `egress:` rule on purpose: a
 default-deny means enumerating every destination every app will ever need,
