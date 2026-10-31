@@ -215,10 +215,62 @@ decrypts them inline at render time via the `sops-age` Secret (created by
 CLI step 10, before ArgoCD is installed — the repo-server mounts it as a
 volume and hangs forever if it is missing).
 
-Tenants do **not** share this key. `homelab` keeps its own SOPS setup;
-`pave` and `recomend` use Infisical + external-secrets. That scheme is
-already cloud-agnostic, which is why moving them off Hetzner needs no
-secret migration at all.
+### Why the platform has secrets of its own
+
+Not leftovers from homelab — the platform runs real services, and each
+needs a credential:
+
+| Secret | Who needs it |
+|---|---|
+| `talos/talsecret.sops.yaml` | the cluster's own PKI: CA certs, bootstrap tokens |
+| `cert-manager/cloudflare-api-token` | DNS-01 solver, for the admin UIs' certs |
+| `external-dns-internal/unifi-api-key` | writing LAN DNS records into UniFi |
+| `longhorn/backup-target-credentials` | the R2 backup target |
+| `monitoring/grafana-admin` | Grafana's admin password |
+
+None of those belongs to a tenant.
+
+### Why SOPS here and Infisical in pave/recomend
+
+Chicken-and-egg, and only the platform has it. `talsecret.sops.yaml` is
+read by `talhelper` to *generate the Talos machine configs* — before any
+cluster exists. Infisical + external-secrets needs a running cluster, the
+ESO operator and a ClusterSecretStore; `paveproject/infra` sets those up in
+its steps 05-07 precisely because `hetzner-k3s create` already built the
+cluster in step 03. Here, that step *is* the cluster. You cannot fetch a
+cluster's PKI from an operator running on a cluster that does not exist yet.
+
+Once SOPS is unavoidable for `talsecret`, using it for the other four
+avoids running two secret systems on the platform. It also means the
+platform boots with no SaaS in the path: if Infisical is unreachable, a
+tenant does not sync but the cluster stays up — the reverse would be a much
+worse failure mode.
+
+And the platform imposes nothing on tenants: `homelab` uses SOPS,
+`pave` and `recomend` use Infisical + ESO, all three keep exactly what they
+already have. That is why bringing them home needs no secret migration.
+
+### Known gap: the Age key is shared with the homelab tenant
+
+`lxup/homelab` currently encrypts its 13 application secrets to the **same**
+Age recipient as this repo. So the platform's private key decrypts the
+tenant's secrets, and the tenant's decrypts the platform's — which is a
+real hole in the boundary everything else here is built to enforce.
+
+It is this way because `talsecret.sops.yaml` moved here already encrypted
+to that key, and re-keying *the platform* would mean regenerating Talos
+secrets, i.e. rebuilding the cluster. So the platform keeps the key and the
+**tenant** gets a new one, in phase 1:
+
+```bash
+age-keygen -o ~/.config/sops/age/homelab-tenant.txt   # new recipient
+# swap it into lxup/homelab's .sops.yaml, then:
+sops updatekeys kubernetes/apps/services/*/*.sops.yaml
+```
+
+Mechanical, and it has to happen in phase 1 anyway: a vcluster cannot see
+the platform's `sops-age` Secret, so that tenant's ArgoCD needs its own
+key in its own namespace regardless.
 
 ### Git credentials, and staying private-ready
 
@@ -262,7 +314,8 @@ The split is phase 0 of four. Nothing is migrated yet.
       namespaces, so ArgoCD adopts rather than recreates.
 - [ ] **Phase 1** — `homelab` becomes a tenant. Riskiest for data, so it
       goes first *only* because it is the one whose downtime costs nothing
-      but convenience.
+      but convenience. Includes giving that tenant its own Age key (see
+      "Known gap" above) and its own ArgoCD Git credential.
 - [ ] **Phase 2** — `pave`. Still in development; the pattern's rehearsal.
 - [ ] **Phase 3** — `recomend`. Production, and the ~70 €/month this was
       all for. Last.
