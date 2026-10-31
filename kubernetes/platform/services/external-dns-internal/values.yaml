@@ -51,7 +51,22 @@ domainFilters:
 
 policy: sync
 registry: txt
-txtOwnerId: platform-internal
+# Kept as "homelab-internal", NOT renamed to something platform-ish, even
+# though this repo is now "platform". external-dns tracks ownership with a
+# TXT record containing this id, and with `policy: sync` an instance only
+# ever touches records it owns. Rename it and every existing record in
+# UniFi becomes an orphan: this instance won't update them (not its), and
+# nothing else will either — LAN DNS silently freezes, and in phase 1 the
+# stale records still point at the old LoadBalancer IP with no owner left
+# to fix them.
+#
+# This instance IS the continuation of the one that has been running, so it
+# keeps its identity. The handover in phase 1 then works on its own: the
+# homelab tenant's external-dns gets a DISTINCT id, this instance stops
+# seeing the apps' Ingresses (they move inside the vcluster) and, still
+# owning those records, deletes them; the tenant's instance recreates them
+# under its own id. Brief gap, self-healing, no manual DNS surgery.
+txtOwnerId: homelab-internal
 interval: 1m
 
 resources:

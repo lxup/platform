@@ -12,7 +12,21 @@
 #
 # It reaches ACROSS repos on purpose, which is precisely the coupling the
 # split exists to remove. That is fine for a migration window and wrong as
-# a steady state. Named zz-* so it sorts last and stays visibly odd.
+# a steady state. The FILE is named zz-* so it sorts last and stays visibly
+# odd; the Application is deliberately NOT.
+#
+# The Application keeps the name `apps-root` — the exact name the old
+# single-repo root already generates, with a byte-identical spec. That makes
+# the switchover a no-op for it: the new root finds `apps-root` in its path,
+# sees no change, and touches nothing.
+#
+# Call it `transitional-homelab-apps` instead and the new root prunes
+# `apps-root` before creating the new one. The 11 child Applications
+# (immich, jellyfin, nextcloud...) survive that — no Application here
+# carries resources-finalizer.argocd.argoproj.io, so the delete is
+# non-cascading and the apps keep running — but they spend a window
+# orphaned, with a tracking-id pointing at an Application that no longer
+# exists, waiting to be re-adopted. Zero upside for that risk.
 #
 # The prerequisite is done: lxup/homelab commit 184b5cc moved external-dns
 # and gatus from kubernetes/core/ to kubernetes/apps/, so everything this
@@ -27,7 +41,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: transitional-homelab-apps
+  name: apps-root
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "100"

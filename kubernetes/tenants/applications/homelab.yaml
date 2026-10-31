@@ -11,6 +11,18 @@
 # Secret `vc-homelab` in the `homelab` namespace. That Secret is what
 # lxup/homelab's CLI reads in place of its old `talhelper`/`hetzner-k3s`
 # provisioning step.
+#
+# ┌──────────────────────────────────────────────────────────────────────┐
+# │ NO `syncPolicy.automated` YET — on purpose, like pave and recomend.  │
+# │ It is what makes phase 0 (switching ArgoCD from lxup/homelab to this │
+# │ repo) a true no-op on the cluster: nothing new is created, the only  │
+# │ changes are an Ingress hostname and a LoadBalancer IP annotation     │
+# │ requesting the address Traefik already holds.                        │
+# │                                                                      │
+# │ Phase 1 starts with an explicit `argocd app sync tenant-homelab`,    │
+# │ at a moment you chose. Give it automated sync in the commit that     │
+# │ brings the tenant's workloads up, so it self-heals from then on.     │
+# └──────────────────────────────────────────────────────────────────────┘
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -26,9 +38,6 @@ spec:
     server: https://kubernetes.default.svc
     namespace: homelab
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
     syncOptions:
       - CreateNamespace=true
       # The vcluster chart brings its own CRDs and a large RBAC surface.
