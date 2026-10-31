@@ -42,7 +42,8 @@ Measured on the live cluster, not estimated:
 
 The 44 KB figure retires an earlier worry: `nextcloud-config` and
 `custom_apps` are not in the R2 backup group, which looked like a gap and is
-not one at that size.
+not one at that size — and matters even less now that migration copies the
+live volume rather than a backup.
 
 Per-app outage is therefore: stop it, dump, copy, start, restore.
 **Nextcloud ~5 minutes. Jellyfin ~10, for the 4.7 GB.** Not hours — that
@@ -148,31 +149,101 @@ itself after three restarts. **Every app with a database dependency will
 probably do something similar on its first sync — CrashLoopBackOff for the
 first minute is not a failure.** Wait before diagnosing.
 
+### Data moves: copy the live volume, do not restore from R2
+
+An earlier draft of this file said to restore `jellyfin-config` from the R2
+backup. That is worse for no reason: the backup runs daily at 03:00, so
+restoring it reintroduces up to 24 hours of divergence on an app that is
+being migrated *right now* and whose current data is sitting on a disk two
+metres away. Copy the live volume instead, and keep R2 as what it is — the
+fallback if a copy goes wrong, not the migration path.
+
+There is ~142 GB free locally and ~4.9 GB of file data to move in total, so
+staging each copy on disk rather than streaming it is affordable and gives a
+checkpoint: if the write into the new volume fails, the source does not have
+to be read again.
+
+**Databases.** `pg_dump` is consistent on its own (MVCC snapshot), so the
+old app does not have to be stopped for the dump to be valid — only for the
+dump to be *final*. Stop it, dump, restore with `--clean --if-exists` into
+the new Postgres, which drops and recreates the tables so it does not matter
+whether the new app has already written anything.
+
+**File volumes.** Use a helper pod that mounts the PVC bare, on both sides,
+rather than exec-ing into the app's own pod:
+
+```
+# source, on the HOST
+kubectl -n <app> run copy-out --image=busybox --restart=Never   --overrides='{"spec":{"containers":[{"name":"c","image":"busybox",
+    "command":["sleep","3600"],"volumeMounts":[{"name":"v","mountPath":"/v"}]}],
+    "volumes":[{"name":"v","persistentVolumeClaim":{"claimName":"<pvc>"}}]}}'
+kubectl -n <app> exec copy-out -- tar cf - -C /v . > <app>.tar
+
+# destination, in the VCLUSTER (same shape, its own kubeconfig)
+kubectl -n <app> exec -i copy-in -- tar xf - -C /v < <app>.tar
+```
+
+Two reasons for the helper pod rather than the app's pod: `strapi-data` is
+mounted at three different paths via subPath, so only a bare mount sees the
+whole volume; and the app has to be down anyway, since Longhorn volumes are
+RWO and an app writing during the copy produces an inconsistent result —
+Jellyfin's config holds a SQLite library database.
+
+To stop the new copy writing while the file copy happens, set `replicas: 0`
+in the app's manifest in the same commit that moves the Application, then
+restore it in a second commit. Two commits, fully declarative, and no
+fighting ArgoCD's `selfHeal` with `kubectl scale`.
+
+**Two volumes not worth copying:**
+
+| Volume | Claim | Why skip |
+|---|---|---|
+| `jellyfin/jellyfin-cache` | 20 Gi | transcode cache, rebuilt on demand |
+| `immich/model-cache` | 10 Gi | ML models, re-downloaded on first use |
+
+That takes the 4.9 GB of real copying down to mostly `jellyfin-config`.
+
 ### Procedure, now that it is proven
 
-Per app, in this order:
+Per app:
 
-1. `pg_dump` (or note that there is nothing to move) **before touching
-   anything**
-2. `git mv kubernetes/apps/applications/<app>.yaml kubernetes/core/applications/`
-   and push — `path:` stays pointing at `kubernetes/apps/services/<app>`
-3. refresh both ArgoCDs; wait for the new copy to come up in the vcluster,
-   through its CrashLoopBackOff if it has a database
-4. restore the dump
-5. verify the hostname answers and the data is there
-6. `kubectl delete namespace <app>` on the **host**, which frees the
-   duplicate Ingress
-7. add an `argoAppCheck` line to this tenant's `cli/src/commands/status.ts`
+1. **Stop nothing yet.** `git mv kubernetes/apps/applications/<app>.yaml
+   kubernetes/core/applications/` and push — `path:` stays pointing at
+   `kubernetes/apps/services/<app>`, which does not move. Add `replicas: 0`
+   in the same commit if the app has a file volume to copy.
+2. Refresh both ArgoCDs. The bridge prunes the old Application
+   non-cascadingly, so the old pods keep running but are now unmanaged —
+   which is what makes step 3 possible without ArgoCD reverting it.
+3. **Outage starts.** Scale the old deployment to 0 on the host.
+4. Copy the data: `pg_dump` for databases, helper-pod `tar` for file
+   volumes.
+5. Second commit restoring `replicas` if step 1 zeroed it. Wait for the new
+   copy, through its CrashLoopBackOff if it has a database.
+6. Verify the hostname answers **and** the data is there — row counts, file
+   counts, not just HTTP 200.
+7. `kubectl delete namespace <app>` on the **host**. This frees the duplicate
+   Ingress and is the point of no return, so do it last.
+8. Add an `argoAppCheck` line to this tenant's
+   `cli/src/commands/status.ts`.
 
-Remaining, roughly by increasing risk: `antoinequehec`, `lxup`,
-`vaultwarden`, `syncthing`, `paperless`, `nextcloud`, `immich`, `jellyfin`,
-`nas-passthrough`.
+Rolling back is possible up to step 7: `git mv` the file back, and the
+bridge re-adopts the still-running old copy.
+
+### Order
+
+`gatus` ✅ · `lxup` · `antoinequehec` · `vaultwarden` · `syncthing` ·
+`paperless` · `nextcloud` · `immich` · `jellyfin` · `nas-passthrough`
+
+`lxup` is next because it has no volume at all — a web deployment and a ghcr
+pull secret — so it exercises the move with nothing to copy.
+`nas-passthrough` is last and trivial: an ExternalName Service and an
+Ingress, no data, no pods.
 
 ## Still unverified
 
-- **Restoring a Longhorn volume from R2.** Gatus's data moved by `pg_dump`
-  and `psql`, which is the right tool for a database and the wrong one for
-  `jellyfin-config` — 4.7 GB of files, no database. That path is untried.
+- **Copying a file volume.** Gatus's data moved by `pg_dump`, which says
+  nothing about the helper-pod `tar` path above. `vaultwarden-data` at 8.4 MB
+  is the cheapest place to prove it before `jellyfin-config` at 4.7 GB.
 - **An application that actually needs the GPU.** The probe proved the
   device reaches a vcluster pod; Jellyfin transcoding and Immich ML through
   it have not been exercised.
