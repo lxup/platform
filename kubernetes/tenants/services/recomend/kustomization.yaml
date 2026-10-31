@@ -10,6 +10,7 @@ namespace: recomend
 resources:
   - namespace.yaml
   - resource-quota.yaml
+  - limit-range.yaml
 
 helmCharts:
   - name: vcluster
