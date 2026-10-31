@@ -22,19 +22,37 @@ spec:
     #    other tenants'.
     - toCIDRSet:
         - cidr: 10.10.100.0/24
-    # 3. The host cluster's API server, by Cilium identity rather than by
-    #    address. Needed because rule 2 is NOT enough on its own: the
-    #    Service CIDR is 10.96.0.0/12 and the host apiserver answers on
-    #    10.96.0.1, which rule 2 never touches. That CIDR cannot simply be
-    #    denied wholesale — this tenant's own vcluster API and its own
-    #    CoreDNS are ClusterIPs in the same range.
     #
-    #    STILL OPEN, and deliberately not guessed at: every other ClusterIP
-    #    on the host stays reachable from here, including the platform's
-    #    Grafana, Prometheus and the Longhorn UI. Closing that needs a
-    #    toEndpoints deny on the platform namespaces with an exception for
-    #    DNS, and getting it wrong breaks name resolution for the whole
-    #    tenant. Validate it against Hubble on a live vcluster in phase 1
-    #    before adding it — not from a README.
-    - toEntities:
-        - kube-apiserver
+    # NO rule for the host apiserver here, and that is a correction, not an
+    # omission. An earlier version denied `toEntities: [kube-apiserver]` on
+    # the reasoning that a tenant's pods talk to their OWN vcluster API over
+    # a ClusterIP and never need the host's. That reasoning forgot the
+    # vcluster control plane, which lives in this same namespace and whose
+    # entire job is talking to the host apiserver — it crash-looped on
+    # `dial tcp 10.96.0.1:443: i/o timeout` within seconds of the first
+    # vcluster coming up. `endpointSelector: {}` means every pod here,
+    # control plane included.
+    #
+    # STILL OPEN: every ClusterIP on the host (10.96.0.0/12) is reachable
+    # from a workload pod, the host apiserver among them. That range cannot
+    # be denied wholesale for the same reason — the tenant's own API and
+    # CoreDNS are ClusterIPs in it.
+    #
+    # The right fix is not a hand-rolled policy at all. The vcluster chart
+    # ships `policies.networkPolicy`, which gets the polarity right: one
+    # NetworkPolicy selecting `vcluster.loft.sh/managed-by` (the workload
+    # pods) and a separate one selecting `release` (the control plane, with
+    # the host apiserver and host kube-dns explicitly allowed). Its
+    # `workload.publicEgress.except` already defaults to 10.0.0.0/8,
+    # 172.16.0.0/12, 192.168.0.0/16 — which covers the home LAN, the cluster
+    # VLAN, the Service CIDR and the pod CIDR in one go, and closes the hole
+    # above properly.
+    #
+    # It is not enabled yet because it is also default-deny for workload
+    # INGRESS, which would cut Traefik off from the UDM Pro's port-forward,
+    # and because this tenant needs an explicit allow to 10.10.10.101 for
+    # nas-passthrough (Traefik proxying Plex — the NFS mounts are made by
+    # the kubelet on the host, not by the pods, so those are unaffected).
+    # Turning it on means working out `workload.ingress` and
+    # `workload.egress` against Hubble on a live vcluster. That is the
+    # phase-1 task; the ResourceQuota is the guardrail until then.
