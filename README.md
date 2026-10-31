@@ -195,23 +195,23 @@ The real guardrails are:
 - a separate API server per tenant;
 - a `ResourceQuota` on the host namespace, where the syncer creates pods —
   so it bites;
-- `CiliumNetworkPolicy` with `egressDeny` on `10.10.10.0/24` (the home LAN,
-  minus the NAS for `homelab`), `10.10.100.0/24` (the Talos API VIP, the
-  node APIs, every LoadBalancer IP on the machine) and the `kube-apiserver`
-  entity.
+- **and, for now, nothing at the network layer.**
 
-**And one hole that is still open.** Those CIDR denials do not cover the
-Service CIDR, `10.96.0.0/12`, so every other ClusterIP on the host stays
-reachable from inside a tenant — the platform's Grafana, Prometheus and the
-Longhorn UI among them. The host apiserver itself is closed by the
-`kube-apiserver` entity rule, but the rest is not.
+That last one is a gap, not a design: a tenant's pods can currently reach
+the home LAN, the cluster VLAN and every ClusterIP on the host. Two attempts
+at a hand-rolled `CiliumNetworkPolicy` were tried and both broke the
+vcluster control plane — the second one fatally, because `10.96.0.1` DNATs
+to the apiserver's real backends on `10.10.100.0/24` and Cilium evaluates
+policy after translation, so denying the VLAN denies the apiserver by the
+back door. One `endpointSelector` cannot both deny the VLAN to workloads and
+allow the apiserver to the control plane.
 
-It cannot be fixed by denying `10.96.0.0/12` wholesale: a tenant's own
-vcluster API and its own CoreDNS are ClusterIPs in that same range. The
-real fix is a `toEndpoints` deny on the platform's namespaces with an
-explicit exception for DNS, and getting that wrong takes name resolution
-down for the whole tenant. It belongs in phase 1, validated against Hubble
-on a live vcluster — not written from a README.
+The vcluster chart's own `policies.networkPolicy` does exactly that, with
+the right polarity and a `publicEgress.except` that already covers
+`10.0.0.0/8`. Enabling it is a phase-1 task with two prerequisites to work
+out against Hubble. The full write-up, including both failures verbatim so
+they are not re-derived, is in
+[`kubernetes/tenants/NETWORK-POLICY.md`](kubernetes/tenants/NETWORK-POLICY.md).
 
 `egressDeny` rather than a default-deny `egress:` rule on purpose: a
 default-deny means enumerating every destination every app will ever need,

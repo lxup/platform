@@ -3,10 +3,13 @@ kind: Kustomization
 
 namespace: homelab
 
+# No network-policy.yaml. See NETWORK-POLICY.md in this directory — a
+# hand-rolled CiliumNetworkPolicy cannot express this correctly, and the
+# vcluster chart's own policies.networkPolicy can. Enabling it is a
+# phase-1 task; the ResourceQuota is the guardrail until then.
 resources:
   - namespace.yaml
   - resource-quota.yaml
-  - network-policy.yaml
 
 helmCharts:
   - name: vcluster
