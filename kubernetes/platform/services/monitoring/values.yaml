@@ -27,44 +27,28 @@
 crds:
   enabled: false
 
+# NO GRAFANA.
+#
+# Removed deliberately, not by accident. It cost 418 Mi plus a PVC to serve
+# dashboards nobody opened — the question "what is Grafana even for, I
+# already have Gatus" is its own answer. What was actually missing was not a
+# screen but a Telegram message when something breaks, which is what
+# Alertmanager now does.
+#
+# Prometheus stays: it is the data source those alerts are evaluated from,
+# and it keeps 15 days of history for answering "why did this restart at
+# 3am" — a question Gatus structurally cannot answer. Its own UI is enough
+# for that, via
+#   kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090:9090
+#
+# Putting Grafana back is flipping this flag plus a LoadBalancer IP from the
+# Cilium pool (no ingress controller needed on the platform, see the
+# README) — worth doing the day someone actually wants to look at a graph.
+#
+# `enabled: false` and not merely deleting the block: the chart defaults
+# Grafana to ON, so removing the section leaves it running on defaults.
 grafana:
-  admin:
-    existingSecret: grafana-admin
-    userKey: admin-user
-    passwordKey: admin-password
-
-  # No Ingress. The platform runs no ingress controller and no cert-manager
-  # of its own — those are a tenant's business (see the README). Grafana is
-  # reached with:
-  #
-  #   kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80
-  #
-  # This is the one real cost of keeping the platform free of HTTP: grafana.nvlab.fr
-  # stops being a bookmark. Everything else exposed here (ArgoCD #0, Hubble,
-  # the Longhorn UI) is opened a few times a month, where port-forward costs
-  # nothing.
-  #
-  # To put it back you need the full set — an ingress controller, a
-  # cert-manager with a Cloudflare token for DNS-01, and something writing
-  # the DNS record — which is exactly the homelab-flavoured infrastructure
-  # this split moved out of the platform. Decide that deliberately, not by
-  # flipping this flag.
-  ingress:
-    enabled: false
-
-  persistence:
-    enabled: true
-    type: pvc
-    storageClassName: longhorn
-    size: 2Gi
-
-  resources:
-    requests:
-      cpu: 200m
-      memory: 512Mi
-    limits:
-      cpu: 1
-      memory: 2Gi
+  enabled: false
 
 prometheus:
   prometheusSpec:
@@ -87,6 +71,12 @@ prometheus:
 
 alertmanager:
   alertmanagerSpec:
+    # The whole configuration comes from a SOPS secret rather than from
+    # `alertmanager.config` here, because it carries the Telegram bot token
+    # and this values file is committed in cleartext. See
+    # alertmanager-config.sops.yaml for the routing and why only eleven of
+    # the 149 loaded rules reach Telegram.
+    configSecret: alertmanager-telegram
     resources:
       requests:
         cpu: 50m

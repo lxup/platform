@@ -1,0 +1,75 @@
+# Longhorn metrics and the two alerts that cover "a volume is degraded".
+#
+# WHY THIS FILE EXISTS. The ask was "notify me if a node or a volume goes
+# down". The node half was already covered — kube-prometheus-stack ships
+# KubeNodeNotReady, KubeletDown and friends. The volume half was not, and
+# not for a subtle reason: Prometheus had **zero** longhorn_* metrics,
+# because nothing was scraping Longhorn at all. Its chart does not ship a
+# ServiceMonitor and none had been written.
+#
+# So "alert me when a Longhorn volume is degraded" needed scraping to exist
+# before a rule could be written against it. Checked rather than assumed:
+#   /api/v1/label/__name__/values returned 2181 metrics, 0 of them longhorn_*
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: longhorn
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack # the Prometheus instance selects on this
+spec:
+  namespaceSelector:
+    matchNames:
+      - longhorn-system
+  selector:
+    matchLabels:
+      app: longhorn-manager
+  endpoints:
+    # longhorn-backend exposes the manager's metrics; the port is named
+    # "manager" in that Service, and ServiceMonitor matches by port name.
+    - port: manager
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: longhorn
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: longhorn.volumes
+      rules:
+        # longhorn_volume_robustness: 0 unknown, 1 healthy, 2 degraded,
+        # 3 faulted.
+        #
+        # Degraded means a replica is gone and Longhorn is rebuilding. The
+        # volume still serves, which is exactly why this matters: nothing
+        # outside notices, and until the rebuild finishes there is no
+        # redundancy left. Volumes here default to 2 replicas, so degraded
+        # means one copy.
+        #
+        # 10m rather than firing immediately: a rolling node reboot or a
+        # pod moving legitimately degrades a volume for a few minutes, and
+        # an alert that cries during every normal operation gets muted.
+        - alert: LonghornVolumeDegraded
+          expr: longhorn_volume_robustness == 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn volume {{ $labels.volume }} is degraded"
+            description: "A replica is missing and has not rebuilt in 10 minutes. The volume still serves but has no redundancy left."
+        # Faulted means Longhorn cannot serve it at all. No `for:` — there
+        # is nothing to wait out.
+        - alert: LonghornVolumeFaulted
+          expr: longhorn_volume_robustness == 3
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn volume {{ $labels.volume }} is FAULTED"
+            description: "Longhorn cannot serve this volume. Whatever uses it is broken or will be shortly."
