@@ -95,6 +95,26 @@ exportKubeConfig:
 policies:
   networkPolicy:
     enabled: true
+    controlPlane:
+      # The chart's own control-plane rule allows any destination on 443,
+      # 8443 and 6443, which covers the host apiserver. metrics-server is
+      # not covered: its Service is 443 but DNATs to 10250, and Cilium
+      # evaluates policy POST-translation, so the packet is judged on
+      # 10250 and dropped. The symptom is not a denied connection anywhere
+      # obvious — it is the vcluster's own metrics proxy on localhost:9001
+      # timing out, which marks v1beta1.metrics.k8s.io FailedDiscoveryCheck
+      # inside the tenant and fails every HPA.
+      egress:
+        - to:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: kube-system
+              podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: metrics-server
+          ports:
+            - port: 10250
+              protocol: TCP
 
 # Proxies the platform's metrics-server into the tenant. Without it
 # metrics.k8s.io simply does not exist here, and api's HorizontalPodAutoscaler
