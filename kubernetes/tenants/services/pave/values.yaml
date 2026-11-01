@@ -65,3 +65,33 @@ controlPlane:
 exportKubeConfig:
   server: https://10.10.100.211:443
   context: pave
+
+# NETWORK ISOLATION. Enabled here and not on homelab because pave is the case
+# where the chart's defaults are enough: it needs nothing on the home LAN
+# (verified — no 10.10.x.x, no NFS, no hostPath anywhere in its repo), and
+# its ingress is reached through a cloudflared tunnel that dials OUT, so the
+# default-deny on workload INGRESS costs nothing. On homelab both of those
+# are false, which is why it has no policy yet.
+#
+# What the chart renders, and why a hand-rolled policy could not:
+#   vc-cp-pave    selects `release: pave` — the control plane — and allows
+#                 the host apiserver and host kube-dns. It MUST reach
+#                 10.10.100.0/24: the apiserver's ClusterIP DNATs to the
+#                 nodes, and Cilium evaluates policy post-translation.
+#   vc-work-pave  selects `vcluster.loft.sh/managed-by` — the workloads —
+#                 default-deny both ways, allowing the vcluster's own DNS and
+#                 API, other pave workloads, and publicEgress below.
+# One selector cannot express both; see ../../NETWORK-POLICY.md.
+#
+# publicEgress.except is left at the chart default, which already covers
+# 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 — the home LAN, the cluster
+# VLAN, the Service CIDR and the pod CIDR in one go. So a compromised pave
+# pod reaches the internet and nothing private, including the other tenants
+# and the platform's own services.
+#
+# Not a kernel sandbox: the host namespace is PSA privileged, so anyone who
+# can create a pod in this vcluster can still escape to the node. That is a
+# question of who holds its kubeconfig, not of network policy.
+policies:
+  networkPolicy:
+    enabled: true
