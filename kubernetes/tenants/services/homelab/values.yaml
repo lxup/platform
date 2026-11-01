@@ -74,3 +74,13 @@ controlPlane:
 exportKubeConfig:
   server: https://10.10.100.210:443
   context: homelab
+
+# Proxies the platform's metrics-server into the tenant, so `kubectl top
+# pod`/`top node` work against this repo's own kubeconfig — which is what
+# the quota comments tell you to use when sizing. Nodes are proxied too
+# here, unlike pave, because this tenant syncs the real ones in.
+integrations:
+  metricsServer:
+    enabled: true
+    nodes: true
+    pods: true

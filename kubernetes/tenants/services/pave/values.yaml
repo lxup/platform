@@ -95,3 +95,16 @@ exportKubeConfig:
 policies:
   networkPolicy:
     enabled: true
+
+# Proxies the platform's metrics-server into the tenant. Without it
+# metrics.k8s.io simply does not exist here, and api's HorizontalPodAutoscaler
+# reported "unable to fetch metrics from resource metrics API: the server
+# could not find the requested resource (get pods.metrics.k8s.io)" — which
+# ArgoCD surfaces as the whole Application Degraded, not as an HPA warning.
+# `nodes: false` to match sync.fromHost.nodes above: this tenant sees a fake
+# node, so node metrics would describe something that does not exist.
+integrations:
+  metricsServer:
+    enabled: true
+    nodes: false
+    pods: true
