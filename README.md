@@ -386,7 +386,7 @@ on Hetzner.
 
 The full record — what each app moved, what verified it, the mistakes made
 along the way, and the per-app procedure for the remaining two — is in
-[`kubernetes/tenants/MIGRATION-HOMELAB.md`](kubernetes/tenants/MIGRATION-HOMELAB.md).
+[`kubernetes/tenants/TENANT-NOTES.md`](kubernetes/tenants/TENANT-NOTES.md).
 
 ### Open, by choice
 
