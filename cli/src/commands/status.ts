@@ -89,21 +89,53 @@ function argoAppCheck(key: string, label: string) {
   };
 }
 
+/**
+ * Tenants are checked apart from the platform's own Applications because
+ * OutOfSync is their normal resting state: `tenant-pave` and
+ * `tenant-recomend` are declared without automated sync and create nothing
+ * until synced deliberately, and `tenant-homelab` carries render drift (a
+ * version-gated RBAC rule ArgoCD's repo-server renders and a local
+ * kustomize does not). Flagging any of that as degraded would train you to
+ * ignore this command.
+ *
+ * What actually matters is Health: a live tenant should be Healthy, and
+ * Missing means "not activated", not "broken".
+ */
+async function checkTenants(): Promise<CheckResult> {
+  const names = ["homelab", "pave", "recomend"];
+  const apps = await Promise.all(names.map((n) => getArgoApplication(`tenant-${n}`)));
+
+  const live = apps.filter((a) => a && a.health === "Healthy").length;
+  const broken = names.filter((_, i) => apps[i] && !["Healthy", "Missing"].includes(apps[i]!.health));
+  const detail = names
+    .map((n, i) => `${n}: ${apps[i] ? apps[i]!.health.toLowerCase() : "absent"}`)
+    .join(", ");
+
+  return {
+    key: "tenants",
+    label: "Tenants",
+    health: broken.length > 0 ? "degraded" : "ok",
+    detail: `${live} live — ${detail}`,
+  };
+}
+
+// Only the Applications the platform still owns. Traefik, cert-manager and
+// both external-dns instances moved to the homelab tenant when the platform
+// stopped exposing HTTP; checking for them here reported "needs attention"
+// on a healthy cluster. There is no ArgoCD Ingress either — ArgoCD #0 is
+// reached with `kubectl -n argocd port-forward svc/argocd-server 8080:80`.
 const CHECKS = [
   checkNodes,
   checkCilium,
   checkArgocd,
   checkRootApp,
-  argoAppCheck("argocd-config", "ArgoCD Ingress"),
-  argoAppCheck("cert-manager", "cert-manager"),
-  argoAppCheck("traefik", "Traefik"),
-  argoAppCheck("longhorn", "Longhorn"),
-  argoAppCheck("external-dns", "Cloudflare DDNS"),
-  argoAppCheck("external-dns-internal", "external-dns (UniFi)"),
   argoAppCheck("cilium-config", "Cilium LB config"),
+  argoAppCheck("longhorn", "Longhorn"),
   argoAppCheck("intel-gpu-plugin", "Intel GPU plugin"),
-  argoAppCheck("monitoring", "Prometheus + Grafana"),
   argoAppCheck("metrics-server", "metrics-server"),
+  argoAppCheck("monitoring", "Prometheus + Alertmanager"),
+  argoAppCheck("tenants-root", "Tenants app-of-apps"),
+  checkTenants,
 ];
 
 const ICON: Record<Health, string> = { ok: pc.green("●"), degraded: pc.yellow("●"), missing: pc.red("●") };

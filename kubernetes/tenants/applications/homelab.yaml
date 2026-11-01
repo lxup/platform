@@ -1,28 +1,10 @@
-# Tenant: homelab — Loup's own apps (Immich, Jellyfin, Nextcloud, Paperless,
-# Vaultwarden, Syncthing, antoinequehec, lxup, nas-passthrough, Gatus).
+# Creates the EMPTY cluster and its guardrails — nothing more. What runs
+# inside comes from lxup/homelab, synced by that repo's own ArgoCD, which lives in
+# this vcluster. The platform never reads it.
 #
-# This Application creates the EMPTY cluster and its guardrails, nothing
-# more. What runs inside it comes from lxup/homelab, synced by that repo's
-# own ArgoCD, which lives inside this vcluster. The platform never reads
-# that repo (except through the clearly-marked transitional bridge in
-# ../../platform/applications/zz-transitional-homelab-apps.yaml).
-#
-# Once synced, the tenant's kubeconfig is published by vcluster as the
-# Secret `vc-homelab` in the `homelab` namespace. That Secret is what
-# lxup/homelab's CLI reads in place of its old `talhelper`/`hetzner-k3s`
-# provisioning step.
-#
-# ┌──────────────────────────────────────────────────────────────────────┐
-# │ NO `syncPolicy.automated` YET — on purpose, like pave and recomend.  │
-# │ It is what makes phase 0 (switching ArgoCD from lxup/homelab to this │
-# │ repo) a true no-op on the cluster: nothing new is created, the only  │
-# │ changes are an Ingress hostname and a LoadBalancer IP annotation     │
-# │ requesting the address Traefik already holds.                        │
-# │                                                                      │
-# │ Phase 1 starts with an explicit `argocd app sync tenant-homelab`,    │
-# │ at a moment you chose. Give it automated sync in the commit that     │
-# │ brings the tenant's workloads up, so it self-heals from then on.     │
-# └──────────────────────────────────────────────────────────────────────┘
+# Once synced, vcluster publishes the tenant's kubeconfig as the Secret
+# `vc-homelab` in the `homelab` namespace. `platform tenant` exports it; that
+# file is what replaces the repo's old cluster-provisioning step.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -38,6 +20,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: homelab
   syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - CreateNamespace=true
       # The vcluster chart brings its own CRDs and a large RBAC surface.

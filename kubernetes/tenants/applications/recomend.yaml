@@ -1,31 +1,23 @@
-# Tenant: recomend — github.com/recomendapp/infra, currently ~70 EUR/month on Hetzner.
+# Creates the EMPTY cluster and its guardrails — nothing more. What runs
+# inside comes from recomendapp/infra, synced by that repo's own ArgoCD, which lives in
+# this vcluster. The platform never reads it.
+#
+# Once synced, vcluster publishes the tenant's kubeconfig as the Secret
+# `vc-recomend` in the `recomend` namespace. `platform tenant` exports it; that
+# file is what replaces the repo's old cluster-provisioning step.
 #
 # ┌──────────────────────────────────────────────────────────────────────┐
-# │ DECLARED BUT NOT ACTIVATED. No `syncPolicy.automated` on purpose:    │
-# │ this Application shows up in the platform ArgoCD as OutOfSync and    │
-# │ creates nothing until someone presses Sync (or runs                  │
-# │ `argocd app sync tenant-recomend`).                                 │
+# │ DECLARED, NOT ACTIVATED. No syncPolicy.automated: it shows as        │
+# │ OutOfSync and creates nothing until `argocd app sync tenant-recomend`.  │
 # └──────────────────────────────────────────────────────────────────────┘
 #
-# LAST in the migration order, and the reason the whole exercise is worth
-# doing. It is in PRODUCTION: do not touch it until the pattern has been
-# proven end-to-end on homelab and then on pave.
-#
-# Two things here that no other tenant has: the Actions Runner Controller
-# (CI jobs from a PUBLIC repo executing in this namespace — see
-# ../services/recomend/values.yaml and the README's security note) and the
-# Android runner pool, which is pure CPU and fits fine on idle EliteDesks.
-#
-# Activating it is a two-sided operation, in this order:
-#   1. Sync this Application        → empty vcluster + quota + guardrails
-#   2. In that project's own repo, swap its cluster-provisioning step from
-#      `hetzner-k3s create` to reading the `vc-recomend` Secret, then run
-#      its installer. Its ArgoCD, ESO/Infisical and apps come up inside.
-#   3. Only once it serves traffic through its own Cloudflare Tunnel:
-#      `hetzner-k3s delete`. Not before — the Hetzner cluster is the
-#      rollback.
-#
-# Give it automated sync once it is live, so it self-heals like the others.
+# Activating it, in order:
+#   1. sync this               → empty vcluster + quota + limit range
+#   2. in recomendapp/infra: swap its provisioning step for reading the vc-recomend
+#      Secret, then run its installer — ArgoCD and its apps come up inside
+#   3. only once it serves traffic through its own tunnel:
+#      `hetzner-k3s delete`. The Hetzner cluster is the rollback.
+# Give it automated sync once live, so it self-heals like homelab.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -43,4 +35,5 @@ spec:
   syncPolicy:
     syncOptions:
       - CreateNamespace=true
+      # The vcluster chart brings its own CRDs and a large RBAC surface.
       - ServerSideApply=true

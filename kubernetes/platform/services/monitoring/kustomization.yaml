@@ -18,9 +18,8 @@ resources:
 generators:
   - ksops-generator.yaml
 
-# No configMapGenerator for dashboards any more: Grafana is gone (see
-# values.yaml), so a ConfigMap labelled grafana_dashboard=1 has nothing to
-# discover it. dashboards/ and its generator were deleted with it.
+# No dashboards: Grafana is disabled (see values.yaml), so a ConfigMap
+# labelled grafana_dashboard=1 would have nothing to discover it.
 
 helmCharts:
   - name: kube-prometheus-stack

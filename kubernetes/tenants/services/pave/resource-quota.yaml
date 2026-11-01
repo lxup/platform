@@ -1,17 +1,26 @@
-# See ../homelab/resource-quota.yaml for the machine-wide memory budget
-# this number was carved out of. Changing requests.memory here takes it
-# from another tenant.
+# Machine-wide budget, 48 Gi total and ~45 Gi allocatable:
+#   platform  ~8 Gi    monitoring, Longhorn, Cilium, apiservers
+#   homelab   16 Gi    measured at 7.9 Gi with ten apps in
+#   pave       4 Gi
+#   recomend  10 Gi
+# Raising requests here takes it from another tenant — check that first.
+#
+# REQUESTS are the guardrail: that is what the scheduler reserves. LIMITS are
+# deliberately over-committed, because a quota counts declared limits rather
+# than usage and this tenant's apps declare generous ones — the original
+# 20 Gi limit filled up at ten apps and refused immich's pods outright while
+# requests sat at a third of theirs.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: tenant-quota
-  namespace: pave
 spec:
   hard:
     requests.cpu: "3"
     requests.memory: 4Gi
     limits.cpu: "12"
     limits.memory: 8Gi
+    # Longhorn replicates x2, so every Gi claimed costs 2 Gi of real disk.
     persistentvolumeclaims: "15"
     requests.storage: 80Gi
     count/pods: "40"

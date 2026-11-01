@@ -66,7 +66,7 @@ where to draw the line. Current answer:
 | **Traefik / ingress** | | ● | |
 | **cert-manager + ClusterIssuers** | | ● | |
 | **external-dns (Cloudflare and UniFi)** | | ● | |
-| **Grafana on a hostname** | | | nobody — port-forward |
+| **Grafana** | | | nobody — removed, see below |
 | A tenant's ArgoCD | | ● | one per repo. The whole point |
 
 ### The platform exposes no HTTP
@@ -98,10 +98,10 @@ WAN IP never appears in their public DNS.
 Three ingress controllers, one port-forward on the UDM, and it never has to
 change.
 
-What the platform gives up: `grafana.nvlab.fr` stops being a bookmark.
-ArgoCD #0, Hubble and the Longhorn UI are opened a few times a month, where
-`kubectl port-forward` costs nothing; Grafana is the one that stings. It is
-the whole price of a platform with no HTTP in it, and it is cheap.
+What the platform gives up: no hostnames of its own. ArgoCD #0, Hubble,
+Prometheus and the Longhorn UI are reached with `kubectl port-forward`,
+which is fine for things opened a few times a month. That is the whole price
+of a platform with no HTTP in it.
 
 ### What a vcluster actually is
 
@@ -163,9 +163,23 @@ differs; two sharing an id will flap each other's records.
 
 `kubernetes/platform/services/monitoring` watches the physical layer —
 nodes, Longhorn, Cilium — and, because the syncer creates real pods, the raw
-resource usage of tenant pods too. Its Grafana has no Ingress, like
-everything else here: reach it with
-`kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80`.
+resource usage of tenant pods too. **There is no Grafana** — it cost 418 Mi
+and a PVC to serve dashboards nobody opened, while the alerting half of the
+stack was discarding everything (Alertmanager's only receiver was `"null"`).
+What was missing was not a screen but a notification.
+
+So Prometheus stays as the data source and Alertmanager now routes to the
+Telegram bot Gatus already uses, landing both in one conversation: Gatus
+says "cloud.nvlab.fr stopped answering", this says "elitedesk-02 is down".
+Eleven of the 149 loaded rules reach Telegram — a node down, a volume
+degraded, a crash loop, a disk filling — chosen because Gatus structurally
+cannot see any of them. The rest stay in Prometheus for post-mortems, via
+`kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090:9090`.
+
+Longhorn needed building rather than configuring: Prometheus had **zero**
+`longhorn_*` metrics, because nothing scraped it and its chart ships no
+ServiceMonitor. Its own NetworkPolicy also had to be unblocked — see
+`kubernetes/platform/services/longhorn/prometheus-scrape-policy.yaml`.
 
 What it cannot see is anything a tenant declares inside its vcluster: a
 `ServiceMonitor` there lives in the tenant's API server and is invisible
@@ -279,7 +293,7 @@ needs a credential:
 |---|---|
 | `talos/talsecret.sops.yaml` | the cluster's own PKI: CA certs, bootstrap tokens |
 | `longhorn/backup-target-credentials` | the R2 backup target |
-| `monitoring/grafana-admin` | Grafana's admin password |
+| `monitoring/alertmanager-config` | the whole Alertmanager config, for the Telegram bot token |
 
 Three, and none belongs to a tenant. The Cloudflare API token and the UniFi
 API key are **not** here: they serve certificates and DNS records for one
@@ -334,8 +348,8 @@ key in its own namespace regardless.
 All four repos are public today, so ArgoCD clones them anonymously. That is
 not something to rely on: `bootstrap/argocd/repo-credentials.sops.yaml`
 holds a `repo-creds` credential template for `https://github.com/lxup`
-(URL prefix, so one entry covers this repo *and* `lxup/homelab`, which the
-transitional bridge reads), and CLI step 12 applies it **unconditionally**.
+(URL prefix, so one entry covers every repo under that account), and CLI
+step 12 applies it **unconditionally**.
 A Git credential ArgoCD does not need is simply unused — so flipping any of
 these repos to private is a visibility toggle on GitHub and nothing else.
 
@@ -360,130 +374,32 @@ vcluster.
 Note that `kustomize build` run locally without `ksops` on PATH silently
 skips those generators — the manifests render, the Secrets just are not
 there. That is expected; only ArgoCD has both the binary and the key.
+## Status
 
-## Migration status
+The homelab migration is done: all ten of its applications run in its
+vcluster, it serves its own ingress on `10.10.100.200`, and the transitional
+bridge that used to reach across repos is gone.
 
-The split is phase 0 of four. Nothing is migrated yet.
+`pave` and `recomend` are declared and not activated — their Applications
+show OutOfSync and create nothing until synced deliberately. They still run
+on Hetzner.
 
-- [x] **Phase 0** — done. ArgoCD #0 now syncs
-      `lxup/platform:kubernetes/platform`. The cluster came through it
-      unchanged: 17 PVCs byte-identical, 97 pods before and after with none
-      unhealthy, 22 Applications Synced+Healthy, Traefik still on
-      `10.10.100.200`, and jellyfin/cloud/immich.nvlab.fr still answering
-      end-to-end over the internet. Three Ingresses went away as intended
-      (`grafana.nvlab.fr`, `hubble.nvlab.fr`, `argocd.nvlab.fr`).
-- [ ] **Phase 1** — `homelab` becomes a tenant. Riskiest for data, so it
-      goes first *only* because it is the one whose downtime costs nothing
-      but convenience. Includes giving that tenant its own Age key (see
-      "Known gap" above) and its own ArgoCD Git credential.
-- [ ] **Phase 2** — `pave`. Still in development; the pattern's rehearsal.
-- [ ] **Phase 3** — `recomend`. Production, and the ~70 €/month this was
-      all for. Last.
+The full record — what each app moved, what verified it, the mistakes made
+along the way, and the per-app procedure for the remaining two — is in
+[`kubernetes/tenants/MIGRATION-HOMELAB.md`](kubernetes/tenants/MIGRATION-HOMELAB.md).
 
-### Companion changes in lxup/homelab
+### Open, by choice
 
-Done, in commit `184b5cc` there:
-
-1. **`external-dns`, `gatus`, `cert-manager`, `traefik` and
-   `external-dns-internal` moved** from `kubernetes/core/` to
-   `kubernetes/apps/`. The last three are the ones that never belonged on
-   the platform; the move also satisfies a mechanical constraint, since the
-   transitional bridge
-   (`kubernetes/platform/applications/zz-transitional-homelab-apps.yaml`)
-   watches `kubernetes/apps/applications` only. Anything left under
-   `core/` there stops reconciling once ArgoCD #0 points here instead.
-
-   Their final home is that tenant's own `kubernetes/core/`, alongside its
-   own ArgoCD, mirroring `paveproject/infra` and `recomendapp/infra`. That
-   reorganisation happens in phase 1, when the tenant's own ArgoCD owns
-   everything and no cross-repo bridge is involved — it is free there and
-   fiddly now.
-2. **Traefik pins `io.cilium/lb-ipam-ips: 10.10.100.200`** in that repo. It
-   is the ingress that owns the UDM Pro's port-forward, and since the
-   platform claims nothing from the pool, nothing contends for the address.
-3. **`argocd.nvlab.fr` removed from the DDNS updater's `DOMAINS`.** The
-   platform ArgoCD has no Ingress at all now; the hostname is held for the
-   `homelab` tenant's own ArgoCD to claim in phase 1, which is what keeps
-   its GitHub webhook working. `DELETE_ON_STOP` is false there, so the
-   existing Cloudflare record survives and merely goes stale — if the WAN
-   IP changes during the migration window, that one hostname points at
-   nothing until phase 1.
-4. **Gatus's ArgoCD check commented out** for the same window, so it does
-   not fire Telegram every minute at a hostname nothing answers. Restore it
-   in the same commit that brings up the tenant's ArgoCD ingress.
-
-Still to do, but *after* the switchover is verified, not before: delete
-from `lxup/homelab` what moved here — `talos/`, `bootstrap/`, `cli/` and
-what is left of `kubernetes/core/` there, which is now exactly the platform
-half. That includes its `core/services/argocd/`, whose Ingress served a
-hostname the platform no longer answers on; pruning its Application is
-non-cascading, so delete the orphaned Ingress and the `homelab-repo-creds`
-Secret by hand after the switchover.
-
-### What is deliberately still wrong
-
-- `kubernetes/platform/services/monitoring` still carries
-  `dashboards/homelab-apps.json`. It belongs to the `homelab` tenant and
-  moves there in phase 1; it stays for now so the Grafana you open today
-  shows exactly what it showed before the split.
-- The transitional bridge reaches across repos, which is the exact coupling
-  this split removes. It is named `zz-` so it sorts last and stays visibly
-  odd. Delete it at the end of phase 1 — but only *after* the tenant-side
-  copies are live, because ArgoCD prunes what it created.
-- No platform Grafana hostname. `grafana.nvlab.fr` is gone until the
-  `homelab` tenant decides to run its own Grafana, or you decide the
-  platform should serve HTTP after all. Port-forward until then.
-
-### Verified, and not
-
-`helm template` and `kustomize build` pass on every service and every
-tenant, and every Application validates against the live cluster's schema.
-
-Proven on the real cluster during phase 0:
-
-- **Pruning an Application is non-cascading here.** No Application carries
-  `resources-finalizer.argocd.argoproj.io`, and when five of them
-  (cert-manager, traefik, external-dns-internal, external-dns, gatus)
-  changed owner from `root` to `apps-root`, every underlying resource kept
-  running and was re-adopted — 17 PVCs intact, 12 certificates still Ready,
-  Traefik's LoadBalancer IP unchanged. This is the mechanism the whole
-  migration leans on, and it is no longer a theory.
-- Switching the root app is an update, not a recreate: `kubectl apply`
-  reported `application.argoproj.io/root configured`.
-- ArgoCD reads both public repos with no credential at all.
-
-Proven in phase 1, with the `homelab` vcluster live:
-
-- **GPU passthrough into a vcluster works.** A pod created inside the
-  vcluster requesting `gpu.intel.com/i915: 1` was scheduled by the host
-  scheduler onto `elitedesk-03` and came up with the real device:
-
-  ```
-  === /dev/dri ===
-  crw-------  1 root root 226,   1  card1
-  crw-rw-rw-  1 root root 226, 128  renderD128
-  ```
-
-  That is the Intel render node Jellyfin needs for Quick Sync and Immich
-  needs for OpenVINO. This was the single unproven assumption the whole
-  plan rested on.
-- `sync.fromHost.storageClasses` works: `longhorn` shows up as the default
-  StorageClass inside the tenant, so `storageClassName: longhorn` in the
-  app manifests needs no change.
-- `sync.fromHost.nodes` works: the tenant sees the real EliteDesk, with
-  `gpu.intel.com/i915: 1` in its allocatable.
-- The pinned LoadBalancer IP works: the tenant's API server came up on
-  `10.10.100.210` and the exported kubeconfig advertises
-  `https://10.10.100.210:443`, usable directly with no port-forward.
-- `platform tenant` lists the vclusters and exports that kubeconfig.
-- Every application container in `lxup/homelab` already declares both
-  `requests` and `limits`, so none of them will be caught by the quota
-  (audited against the live cluster).
-
-What has still **not** been exercised:
-
-- `policies.networkPolicy` — see `kubernetes/tenants/NETWORK-POLICY.md`.
-  Nothing constrains a tenant at the network layer today.
-- Restoring the 14 Longhorn PVCs from R2 into tenant-side PVCs.
-- Running an actual application in the vcluster. The vcluster, its CoreDNS
-  and a throwaway GPU pod are all that has run in it so far.
+- **No network policy on tenants.** The quota is the only guardrail. A
+  hand-rolled CiliumNetworkPolicy cannot express this (it broke the vcluster
+  control plane twice); the chart's own `policies.networkPolicy` can, and
+  needs two settings worked out against Hubble. See
+  [`kubernetes/tenants/NETWORK-POLICY.md`](kubernetes/tenants/NETWORK-POLICY.md).
+  `pave` is the easy case to prove it on: no private network needs, and its
+  tunnel dials out so default-deny ingress costs nothing.
+- **The Age key is shared with the homelab tenant** — see above.
+- **`tenant-homelab` is manual-sync.** It reports OutOfSync on three
+  resources from render drift (a version-gated RBAC rule that ArgoCD's
+  repo-server renders and a local `kustomize` does not). Harmless while
+  manual; decide on `ignoreDifferences` from a real `argocd app diff` before
+  giving it `selfHeal`.

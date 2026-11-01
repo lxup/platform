@@ -1,26 +1,13 @@
-# The companion a ResourceQuota always needs, and whose absence cost an
-# afternoon the first time a pod was created in this namespace:
-#
-#   Error syncing to host cluster: create object: pods "gpu-probe" is
-#   forbidden: failed quota: tenant-quota: must specify limits.
-#
-# Once a ResourceQuota constrains requests.cpu/memory and
-# limits.cpu/memory, Kubernetes REJECTS any pod that does not declare all
-# four. Without a LimitRange supplying defaults, every workload in this
-# tenant must spell out resources or it never reaches a node — and the
-# failure surfaces as a vcluster SyncError on the virtual pod, which is an
-# unpleasant place to debug it from.
-#
-# These are a safety net, not a policy: an app that declares its own
-# resources (which most of this tenant's do) is unaffected. The numbers are
-# deliberately modest so that a workload which forgot to declare anything
-# gets something runnable rather than something that silently hogs the
-# quota.
+# The companion a ResourceQuota needs. Once a quota constrains
+# requests/limits for cpu and memory, Kubernetes REJECTS any pod that does
+# not declare all four — and the rejection surfaces as a vcluster SyncError
+# on the virtual pod, with nothing at all in `kubectl get pods -n homelab` on
+# the host. These defaults are the safety net; apps that declare their own
+# resources are unaffected.
 apiVersion: v1
 kind: LimitRange
 metadata:
   name: tenant-defaults
-  namespace: homelab
 spec:
   limits:
     - type: Container

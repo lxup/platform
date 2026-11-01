@@ -1,19 +1,15 @@
-# Host-side namespace for the `homelab` tenant. Everything the tenant's
-# vcluster creates — its control-plane pod and every workload pod its
-# syncer pushes down — lands here, which is what makes the ResourceQuota
-# and the CiliumNetworkPolicy next to this file actually bite.
+# Host-side namespace for the `homelab` tenant: its vcluster control plane and
+# every workload pod its syncer pushes down land here, which is what makes
+# the ResourceQuota next to this file actually bite.
 #
-# Pod Security "privileged", deliberately. The tenant's own API server
-# enforces its own PSA for the tenant's own namespaces; what reaches THIS
-# namespace is already-admitted pods carrying arbitrary securityContexts,
-# and host-side "baseline" would reject them after the fact — the pod would
-# exist in the vcluster and never appear on a node, which is a miserable
-# failure mode to debug.
+# PSA `privileged` deliberately. The tenant's own API server enforces PSA for
+# its own namespaces; what reaches here is already-admitted pods carrying
+# arbitrary securityContexts, and host-side `baseline` would reject them
+# after the fact — the pod would exist in the vcluster and never appear on a
+# node, which is a miserable failure to debug.
 #
-# So PSA is not the tenant boundary here. The boundary is: a separate API
-# server (no access to this cluster's objects), a ResourceQuota (can't eat
-# the machine) and egressDeny rules (can't reach the LAN or the cluster
-# VLAN). Read network-policy.yaml before assuming a tenant is contained.
+# So PSA is NOT the tenant boundary. The boundary is a separate API server
+# and the quota. There is no network policy yet: see ../../NETWORK-POLICY.md.
 apiVersion: v1
 kind: Namespace
 metadata:
