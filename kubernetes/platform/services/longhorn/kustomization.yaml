@@ -6,6 +6,10 @@ namespace: longhorn-system
 resources:
   - namespace.yaml
   - recurring-job.yaml
+  # Lets Prometheus reach the manager's metrics — Longhorn's own
+  # NetworkPolicy blocks it. See the file for why it lives here and not next
+  # to the ServiceMonitor.
+  - prometheus-scrape-policy.yaml
 
 generators:
   - ksops-generator.yaml

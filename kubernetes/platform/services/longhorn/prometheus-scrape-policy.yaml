@@ -1,0 +1,40 @@
+# Lets Prometheus scrape the manager's metrics on 9500.
+#
+# Longhorn's own chart ships a NetworkPolicy on app=longhorn-manager that is
+# Ingress-only and allows exactly three sources — longhorn-manager,
+# longhorn-ui and longhorn-csi-plugin. Prometheus is not among them, so
+# scraping failed with "context deadline exceeded" and its three targets sat
+# health=down. That was the blocker, found by reading Longhorn's policy after
+# confirming the ServiceMonitor, its labels, Prometheus's selector and the
+# RBAC were all already correct.
+#
+# Additive rather than a change to Longhorn's own policy: NetworkPolicies
+# union, so this grants one more source without touching what the chart
+# manages, and without ArgoCD fighting to restore its version.
+#
+# It lives here rather than next to the ServiceMonitor in
+# ../monitoring/ because kustomize's `namespace:` transformer runs after
+# patches — a resource in that directory cannot be made to land anywhere but
+# `monitoring`, and this one has to be in `longhorn-system` with the pods it
+# selects. This directory already sets namespace: longhorn-system.
+#
+# The matching ServiceMonitor and the volume-degradation alerts are in
+# ../monitoring/longhorn-monitoring.yaml.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+spec:
+  podSelector:
+    matchLabels:
+      app: longhorn-manager
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9500
+          protocol: TCP
