@@ -10,6 +10,13 @@
 # than usage and this tenant's apps declare generous ones — the original
 # 20 Gi limit filled up at ten apps and refused immich's pods outright while
 # requests sat at a third of theirs.
+#
+# A quota whose `hard` sits BELOW current `used` does not fail loudly: it
+# just refuses the next pod. limits.cpu was 24 against 40 actually declared,
+# which went unnoticed until the vcluster's own control plane was deleted to
+# pick up a config change and could not be recreated — the tenant's API went
+# down while its workloads, already admitted, kept running. Check
+# `kubectl describe resourcequota -n <tenant>` after lowering anything here.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -18,7 +25,7 @@ spec:
   hard:
     requests.cpu: "12"
     requests.memory: 16Gi
-    limits.cpu: "24"
+    limits.cpu: "64"
     limits.memory: 48Gi
     # Longhorn replicates x2, so every Gi claimed costs 2 Gi of real disk.
     persistentvolumeclaims: "30"
