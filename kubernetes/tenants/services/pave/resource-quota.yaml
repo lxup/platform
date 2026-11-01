@@ -7,9 +7,11 @@
 #
 # REQUESTS are the guardrail: that is what the scheduler reserves. LIMITS are
 # deliberately over-committed, because a quota counts declared limits rather
-# than usage and this tenant's apps declare generous ones — the original
-# 20 Gi limit filled up at ten apps and refused immich's pods outright while
-# requests sat at a third of theirs.
+# than usage, and most of what runs here comes from Helm charts that declare
+# no resources at all — the LimitRange then stamps 512 Mi of limit on each.
+# Counted: ~20 pods, 2.3 Gi of requests, 8.1 Gi of limits. An 8 Gi limit
+# refused ArgoCD's own pods mid-bootstrap, and the refusal surfaces as a
+# vcluster SyncError on the virtual pod with nothing visible host-side.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -18,8 +20,8 @@ spec:
   hard:
     requests.cpu: "3"
     requests.memory: 4Gi
-    limits.cpu: "12"
-    limits.memory: 8Gi
+    limits.cpu: "24"
+    limits.memory: 16Gi
     # Longhorn replicates x2, so every Gi claimed costs 2 Gi of real disk.
     persistentvolumeclaims: "15"
     requests.storage: 80Gi
