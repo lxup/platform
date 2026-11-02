@@ -38,7 +38,11 @@ spec:
   hard:
     requests.cpu: "12"
     requests.memory: 20Gi
-    limits.cpu: "32"
+    # 28,1 déjà déclarés par le socle, et chaque pod de flow demande 4 de
+    # limite : à 32 le premier sync_typesense était refusé pour 0,1 CPU. Les
+    # limites CPU throttlent, elles ne réservent pas, donc les sur-engager ne
+    # coûte rien — requests.cpu (3,06 sur 12) est le chiffre qui compte.
+    limits.cpu: "64"
     limits.memory: 48Gi
     # Longhorn replicates x2, so every Gi claimed costs 2 Gi of real disk.
     # Measured: 149 Gi of PVCs on Hetzner, so ~300 Gi of array — there is
@@ -46,6 +50,7 @@ spec:
     persistentvolumeclaims: "25"
     requests.storage: 200Gi
     count/pods: "60"
-    # Zero needed in practice: Traefik runs ClusterIP behind cloudflared,
-    # same as pave. Left at 1 as a margin, not as a plan.
+    # Exactement 1, et il est déjà pris : c'est le Service LoadBalancer du
+    # control plane du vcluster (10.10.100.212), pas une marge. Traefik tourne
+    # en ClusterIP derrière cloudflared, donc rien d'autre n'en demande.
     services.loadbalancers: "1"
