@@ -53,6 +53,12 @@ grafana:
 prometheus:
   prometheusSpec:
     retention: 15d
+    # Without this, 15d is the only bound and Prometheus fills the volume:
+    # it reached 20Gi plus an 18.9Gi Longhorn snapshot holding the
+    # overwritten blocks. Whichever limit hits first wins, and 14GiB keeps
+    # headroom for the WAL and for compaction, which needs room for the
+    # output block before it drops the inputs.
+    retentionSize: 14GiB
     resources:
       requests:
         cpu: 250m
