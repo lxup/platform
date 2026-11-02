@@ -1,27 +1,51 @@
-# Machine-wide budget, 48 Gi total and ~45 Gi allocatable:
-#   platform  ~8 Gi    monitoring, Longhorn, Cilium, apiservers
-#   homelab   16 Gi    measured at 7.9 Gi with ten apps in
-#   pave       4 Gi
-#   recomend  10 Gi
-# Raising requests here takes it from another tenant — check that first.
+# Machine-wide budget. Measured, not estimated — 44.2 Gi allocatable and
+# 15.80 Gi of requests in place today:
+#   platform   4.1 Gi   apiservers, Cilium, Longhorn, Prometheus, ArgoCD
+#   homelab    9.3 Gi   against a 16 Gi quota
+#   pave       2.4 Gi   against a 4 Gi quota
+#   recomend  20   Gi   this file
+# The quotas now sum past what the machine has, which is deliberate: a quota
+# is a per-tenant ceiling, not a reservation. The scheduler is the real
+# arbiter, and it only sees actual pod requests.
+#
+# Where the 20 Gi comes from, measured on the Hetzner cluster:
+#   backend                  7.9 Gi   postgres 3.5, typesense 3.0, rest 1.4
+#   default                  2.8 Gi   web-app 2.0, umami, martin
+#   prefect at rest          2.3 Gi   its postgres, server and worker
+#   pods with no resources   1.7 Gi   argocd, ESO, traefik, cloudflared —
+#                                     the LimitRange stamps 128Mi on each
+#   vcluster control plane   0.3 Gi
+#   ------------------------------
+#   socle                   15.0 Gi
+#   + sync_tmdb              3.0 Gi   daily at 12:00, measured 2448 Mi
+#   + 2 × run_import         2.0 Gi
+#
+# That last line is the deliberate limit. run_import carries
+# concurrency_limit: 5 in db-sync/prefect.yaml, which would be 5 Gi of flow
+# pods landing at once on top of sync_tmdb — 23 Gi, which fits no node once
+# the socle is in. Capping requests here refuses the 3rd import at admission
+# instead of leaving pods Pending forever. Drop that concurrency to 2 in
+# prefect.yaml and this ceiling stops being a surprise.
 #
 # REQUESTS are the guardrail: that is what the scheduler reserves. LIMITS are
-# deliberately over-committed, because a quota counts declared limits rather
-# than usage and this tenant's apps declare generous ones — the original
-# 20 Gi limit filled up at ten apps and refused immich's pods outright while
-# requests sat at a third of theirs.
+# over-committed on purpose, because a quota counts declared limits rather
+# than usage.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: tenant-quota
 spec:
   hard:
-    requests.cpu: "6"
-    requests.memory: 10Gi
-    limits.cpu: "20"
-    limits.memory: 16Gi
+    requests.cpu: "12"
+    requests.memory: 20Gi
+    limits.cpu: "32"
+    limits.memory: 48Gi
     # Longhorn replicates x2, so every Gi claimed costs 2 Gi of real disk.
+    # Measured: 149 Gi of PVCs on Hetzner, so ~300 Gi of array — there is
+    # 1213 Gi free, this one is not tight.
     persistentvolumeclaims: "25"
-    requests.storage: 150Gi
+    requests.storage: 200Gi
     count/pods: "60"
-    services.loadbalancers: "2"
+    # Zero needed in practice: Traefik runs ClusterIP behind cloudflared,
+    # same as pave. Left at 1 as a margin, not as a plan.
+    services.loadbalancers: "1"

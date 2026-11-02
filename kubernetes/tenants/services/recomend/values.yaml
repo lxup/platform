@@ -66,3 +66,48 @@ controlPlane:
 exportKubeConfig:
   server: https://10.10.100.212:443
   context: recomend
+
+# NETWORK ISOLATION. Non-negotiable here, more than for any other tenant:
+# this one runs the Actions Runner Controller for a PUBLIC repo, so a CI job
+# proposed by a stranger executes in its namespace. Verified it needs nothing
+# on the home LAN — the hostPath/nfs/hostNetwork hits in its repo are all
+# inside the ARC CRD schemas, not actual usage.
+#
+# What the chart renders, and why a hand-rolled policy could not: see
+# ../pave/values.yaml and ../../NETWORK-POLICY.md. publicEgress.except keeps
+# the chart default, which already covers 10/8, 172.16/12 and 192.168/16 — so
+# the home LAN, the cluster VLAN, the Service CIDR and the pod CIDR in one go.
+#
+# Not a kernel sandbox: the host namespace is PSA privileged, so anyone who
+# can create a pod here can still escape to the node. For a tenant running
+# other people's CI that matters — it is an argument for keeping the runner
+# out, not something this policy fixes.
+policies:
+  networkPolicy:
+    enabled: true
+    controlPlane:
+      # The chart allows any destination on 443/8443/6443, which covers the
+      # host apiserver. metrics-server is not covered: Service 443 DNATs to
+      # 10250 and Cilium judges post-translation. Without this the tenant's
+      # metrics API never comes up and every HPA fails — see ../pave/values.yaml.
+      egress:
+        - to:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: kube-system
+              podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: metrics-server
+          ports:
+            - port: 10250
+              protocol: TCP
+
+# Required, not optional: this tenant declares two HorizontalPodAutoscalers
+# (web-app and backend/api). Without the proxy, metrics.k8s.io does not exist
+# inside the vcluster and ArgoCD reports the whole Application Degraded rather
+# than flagging the HPA. nodes: false to match sync.fromHost.nodes above.
+integrations:
+  metricsServer:
+    enabled: true
+    nodes: false
+    pods: true
