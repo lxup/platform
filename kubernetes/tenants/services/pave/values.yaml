@@ -24,6 +24,11 @@ sync:
 
 controlPlane:
   statefulSet:
+    # Set explicitly because the chart's default of "" renders as a YAML
+    # null, which the API server then defaults — leaving git and the live
+    # object permanently different and the Application stuck OutOfSync.
+    imagePullPolicy: IfNotPresent
+
     resources:
       requests:
         cpu: 100m

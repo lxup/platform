@@ -38,11 +38,6 @@ spec:
         - /metadata/annotations/vcluster.loft.sh~1service-cidr
         # The chart renders 0; the API server assigns a real port.
         - /spec/ports/0/nodePort
-    - group: apps
-      kind: StatefulSet
-      jsonPointers:
-        # The chart renders null; the API server defaults it to IfNotPresent.
-        - /spec/template/spec/containers/0/imagePullPolicy
     - group: monitoring.coreos.com
       kind: ServiceMonitor
       jqPathExpressions:
