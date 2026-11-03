@@ -5,19 +5,6 @@
 # Once synced, vcluster publishes the tenant's kubeconfig as the Secret
 # `vc-pave` in the `pave` namespace. `platform tenant` exports it; that
 # file is what replaces the repo's old cluster-provisioning step.
-#
-# ┌──────────────────────────────────────────────────────────────────────┐
-# │ DECLARED, NOT ACTIVATED. No syncPolicy.automated: it shows as        │
-# │ OutOfSync and creates nothing until `argocd app sync tenant-pave`.  │
-# └──────────────────────────────────────────────────────────────────────┘
-#
-# Activating it, in order:
-#   1. sync this               → empty vcluster + quota + limit range
-#   2. in paveproject/infra: swap its provisioning step for reading the vc-pave
-#      Secret, then run its installer — ArgoCD and its apps come up inside
-#   3. only once it serves traffic through its own tunnel:
-#      `hetzner-k3s delete`. The Hetzner cluster is the rollback.
-# Give it automated sync once live, so it self-heals like homelab.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -33,7 +20,24 @@ spec:
     server: https://kubernetes.default.svc
     namespace: pave
   syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - CreateNamespace=true
       # The vcluster chart brings its own CRDs and a large RBAC surface.
       - ServerSideApply=true
+  # Two fields nothing can reconcile, excluded so they stop showing as a
+  # permanent OutOfSync that hides real drift: the syncer writes
+  # service-cidr onto its own Service at runtime, and the ServiceMonitor CRD
+  # defaults relabelings[].action to "replace", which the chart omits.
+  # selfHeal above would otherwise retry them forever.
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /metadata/annotations/vcluster.loft.sh~1service-cidr
+    - group: monitoring.coreos.com
+      kind: ServiceMonitor
+      jqPathExpressions:
+        - .spec.endpoints[].relabelings[].action
