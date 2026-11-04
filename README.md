@@ -8,16 +8,16 @@ cluster:
 
 | Tenant | Repo | What it is | Status |
 |---|---|---|---|
-| `homelab` | [lxup/homelab](https://github.com/lxup/homelab) | Immich, Jellyfin, Nextcloud, Paperless, Vaultwarden, Syncthing, two websites | migrating |
-| `pave` | [paveproject/infra](https://github.com/paveproject/infra) | api, postgres, redis, rustfs, notify | declared, still on Hetzner |
-| `recomend` | [recomendapp/infra](https://github.com/recomendapp/infra) | backend, web-app, martin, prefect, umami | declared, still on Hetzner (production) |
+| `homelab` | [lxup/homelab](https://github.com/lxup/homelab) | Immich, Jellyfin, Nextcloud, Paperless, Vaultwarden, Syncthing, two websites | live |
+| `pave` | [paveproject/infra](https://github.com/paveproject/infra) | api, postgres, redis, rustfs, notify | live |
+| `recomend` | [recomendapp/infra](https://github.com/recomendapp/infra) | backend, web-app, martin, prefect, umami | live (production) |
 
 ## Why this repo exists
 
 It used to be one repo. `lxup/homelab` held the Talos configs, the cluster
-infra *and* the media apps, while two other projects paid Hetzner for their
-own k3s clusters — about 75 €/month between them, after Hetzner's RAM-driven
-price rise.
+infra *and* the media apps, while two other projects rented their own managed
+clusters — about 75 €/month between them, and climbing. Self-hosting all of it
+is the point of this repo.
 
 The EliteDesks are 32% used. Three nodes, 48 GB of RAM, 36 threads, running
 at 3% CPU. There is room for all of it at home.
@@ -143,8 +143,8 @@ changes. `pave` and `recomend` need no ingress address at all — their
 
 Tenant API servers are on a pinned LoadBalancer IP rather than the chart's
 default `localhost:8443`, because the address ends up written inside a
-kubeconfig on disk: a tenant's installer CLI needs to use that file
-directly, the way `hetzner-k3s create` used to hand it one.
+kubeconfig on disk: a tenant's installer CLI reads that file directly, so the
+address in it has to be reachable from outside the cluster.
 
 ### DNS
 
@@ -306,10 +306,10 @@ the thing that runs every tenant.
 Chicken-and-egg, and only the platform has it. `talsecret.sops.yaml` is
 read by `talhelper` to *generate the Talos machine configs* — before any
 cluster exists. Infisical + external-secrets needs a running cluster, the
-ESO operator and a ClusterSecretStore; `paveproject/infra` sets those up in
-its steps 05-07 precisely because `hetzner-k3s create` already built the
-cluster in step 03. Here, that step *is* the cluster. You cannot fetch a
-cluster's PKI from an operator running on a cluster that does not exist yet.
+ESO operator and a ClusterSecretStore; a tenant repo can set those up in its
+later steps precisely because its cluster already exists by then. Here, that
+step *is* the cluster. You cannot fetch a cluster's PKI from an operator
+running on a cluster that does not exist yet.
 
 Once SOPS is unavoidable for `talsecret`, using it for the other four
 avoids running two secret systems on the platform. It also means the
@@ -318,8 +318,8 @@ tenant does not sync but the cluster stays up — the reverse would be a much
 worse failure mode.
 
 And the platform imposes nothing on tenants: `homelab` uses SOPS,
-`pave` and `recomend` use Infisical + ESO, all three keep exactly what they
-already have. That is why bringing them home needs no secret migration.
+`pave` and `recomend` use Infisical + ESO, and all three keep exactly what
+they already have.
 
 ### Known gap: the Age key is shared with the homelab tenant
 
@@ -331,7 +331,7 @@ real hole in the boundary everything else here is built to enforce.
 It is this way because `talsecret.sops.yaml` moved here already encrypted
 to that key, and re-keying *the platform* would mean regenerating Talos
 secrets, i.e. rebuilding the cluster. So the platform keeps the key and the
-**tenant** gets a new one, in phase 1:
+**tenant** gets a new one. Still to do:
 
 ```bash
 age-keygen -o ~/.config/sops/age/homelab-tenant.txt   # new recipient
@@ -339,9 +339,9 @@ age-keygen -o ~/.config/sops/age/homelab-tenant.txt   # new recipient
 sops updatekeys kubernetes/apps/services/*/*.sops.yaml
 ```
 
-Mechanical, and it has to happen in phase 1 anyway: a vcluster cannot see
-the platform's `sops-age` Secret, so that tenant's ArgoCD needs its own
-key in its own namespace regardless.
+Mechanical, and unavoidable regardless: a vcluster cannot see the platform's
+`sops-age` Secret, so that tenant's ArgoCD needs its own key in its own
+namespace anyway.
 
 ### Git credentials, and staying private-ready
 
@@ -367,25 +367,24 @@ PAT with Contents: read-only, not the token from `gh auth token`.
 
 **Each tenant needs its own.** `pave` and `recomend` already have one
 (their own ExternalSecret, their own ArgoCD, inside their own vcluster).
-The `homelab` tenant will need one in phase 1 — its ArgoCD reads
-`lxup/homelab`, and this platform credential is not visible from inside a
-vcluster.
+The `homelab` tenant still needs one — its ArgoCD reads `lxup/homelab`, and
+this platform credential is not visible from inside a vcluster.
 
 Note that `kustomize build` run locally without `ksops` on PATH silently
 skips those generators — the manifests render, the Secrets just are not
 there. That is expected; only ArgoCD has both the binary and the key.
 ## Status
 
-The homelab migration is done: all ten of its applications run in its
-vcluster, it serves its own ingress on `10.10.100.200`, and the transitional
-bridge that used to reach across repos is gone.
+All three tenants run in their own vcluster on the EliteDesks. `homelab`
+serves its own ingress on `10.10.100.200`; `pave` and `recomend` reach the
+internet through their own cloudflared tunnels, so they have no inbound path
+and nothing contends for the single UDM port-forward.
 
-`pave` and `recomend` are declared and not activated — their Applications
-show OutOfSync and create nothing until synced deliberately. They still run
-on Hetzner.
+Everything is self-hosted. There is no external cluster left and nothing is
+rented any more.
 
-The full record — what each app moved, what verified it, the mistakes made
-along the way, and the per-app procedure for the remaining two — is in
+What it takes to stand a tenant up, and the traps worth knowing before you
+move data between two of them, is in
 [`kubernetes/tenants/TENANT-NOTES.md`](kubernetes/tenants/TENANT-NOTES.md).
 
 ### Open, by choice

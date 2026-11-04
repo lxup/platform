@@ -1,26 +1,11 @@
 # Bringing a tenant up
 
-Written for `pave` and `recomend`, the two still on Hetzner. Everything here
-either bit during the homelab migration or was measured during it; the
-narrative of that migration is in git history, not in this file.
+Everything here either bit or was measured while standing the three tenants
+up. It is the operational knowledge that is not visible in a manifest: what
+the quota does to pods, what a first sync looks like, and how to move data
+into a tenant's volumes without quietly losing some of it.
 
-## Their migration is not shaped like homelab's
-
-homelab moved between two clusters on the same hardware, so a lot of its
-mechanics do not transfer:
-
-| | homelab | pave / recomend |
-|---|---|---|
-| source | the same cluster | a Hetzner cluster, over the internet |
-| old copy during the move | kept running (non-cascading prune) and was deleted by hand | stays up on Hetzner until `hetzner-k3s delete` — a real rollback |
-| ingress handover | contended for `10.10.100.200` behind the UDM forward | none: `cloudflared` dials out, no inbound, no address to contend for |
-| secrets | SOPS + ksops | Infisical + external-secrets, unchanged by the move |
-| bulk data | NFS from the NAS, never moved | Longhorn volumes and object storage, all of it moves |
-
-The rollback story is better for them: Hetzner keeps serving until you
-delete it, so there is no window where the only copy is the new one.
-
-## What will bite anyway
+## What will bite
 
 **A LimitRange is mandatory.** Once the tenant quota constrains
 requests/limits for cpu and memory, Kubernetes rejects any pod that does not
@@ -45,9 +30,9 @@ Longhorn PVC, and those are RWO, so the app could not start:
 
 **Watch the control plane's memory as apps arrive.** It tracks the object
 count it syncs, not idle size: 330 Mi empty, 708 Mi with one ArgoCD. A limit
-set from the empty figure OOMs partway through a migration.
+set from the empty figure OOMs partway through a rollout.
 
-## Moving data
+## Moving data into a tenant
 
 **Databases.** `pg_dump` takes an MVCC snapshot, so it is consistent whether
 or not the app is running — the app only has to be stopped for the dump to be
@@ -73,10 +58,10 @@ kubectl -n <ns> exec -i copy-in -- tar xf - -C /v < app.tar
 Compare `find -type f | wc -l` **and** the sum of file sizes, not `du -sb` —
 that differs by a block of directory allocation between filesystems and
 looks like data loss. Then verify with something that reads the copied bytes:
-fetching a JPEG out of migrated uploads over HTTPS proves more than a
+fetching a JPEG out of the copied uploads over HTTPS proves more than a
 matching byte count. Proven from 44 KB to 4.7 GB, byte-exact each time.
 
-To stop the new copy writing during a file copy, put `replicas: 0` in the
+To stop the destination writing during a file copy, put `replicas: 0` in the
 same commit that moves the Application and restore it in the next —
 declarative, so `selfHeal` does not undo it mid-copy.
 
