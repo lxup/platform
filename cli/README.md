@@ -57,17 +57,18 @@ vclusters, shows which have a live control plane and on which address, and
 writes a chosen tenant's kubeconfig to `tenants/<name>.kubeconfig`
 (gitignored, mode 600).
 
-That file is what replaces a tenant repo's cluster-provisioning step:
+That file stands in for a tenant repo's cluster-provisioning step: instead of
+building a cluster of its own, each repo reads the kubeconfig this writes.
 
 ```
-lxup/homelab        step 03  talhelper/talosctl   →  read tenants/homelab.kubeconfig
-paveproject/infra   step 03  hetzner-k3s create   →  read tenants/pave.kubeconfig
-recomendapp/infra   step 02  hetzner-k3s create   →  read tenants/recomend.kubeconfig
+lxup/homelab        →  reads tenants/homelab.kubeconfig
+paveproject/infra   →  reads tenants/pave.kubeconfig
+recomendapp/infra   →  reads tenants/recomend.kubeconfig
 ```
 
 Every step after that in those repos — external-secrets, Infisical, their own
-ArgoCD, their own root app — is unchanged. That is the whole point: one step
-per repo moves, nothing else.
+ArgoCD, their own root app — is theirs alone and the platform touches none of
+it. That is the whole point: exactly one step per repo is ours.
 
 The kubeconfig is only published once the tenant's control plane has actually
 started, so sync the tenant's Application in the platform ArgoCD first.
