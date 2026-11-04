@@ -26,6 +26,12 @@ server:
   insecure: true
   extraArgs:
     - --insecure
+  # See the resources note at the bottom of this file. 34 Mi measured.
+  resources:
+    requests:
+      memory: 64Mi
+    limits:
+      memory: 256Mi
 
 configs:
   cm:
@@ -83,3 +89,78 @@ repoServer:
       value: /.config
     - name: SOPS_AGE_KEY_FILE
       value: /.config/sops/age/keys.txt
+
+  # 168 Mi measured at rest, but this is the pod that runs `kustomize build
+  # --enable-helm` over every service in the repo — including
+  # kube-prometheus-stack, a chart big enough that a render spikes well
+  # above steady state. Hence a 1Gi ceiling rather than something snug: an
+  # OOMKill here does not degrade gracefully, it fails every sync.
+  resources:
+    requests:
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# Memory requests for the remaining components.
+#
+# WHY. All 7 ArgoCD pods ran with zero requests, QoS BestEffort, and — unlike
+# Longhorn, which carries priorityClass `longhorn-critical` — with no
+# priority class at all (priority 0). That combination makes ArgoCD the
+# genuine first casualty of any node memory pressure: the kubelet evicts
+# BestEffort first and breaks ties on priority. Losing ArgoCD does not stop
+# running workloads, but it stops reconciliation at exactly the moment the
+# cluster is in trouble and you need to change something.
+#
+# Declaring requests moves every pod to Burstable, which is most of the fix.
+# It also stops the scheduler treating ~500 Mi of real usage as free space.
+#
+# Calibrated on measured steady usage, not guessed:
+#   application-controller     274 Mi -> 384Mi   (holds all Application state;
+#                                                 grows with tenant count)
+#   repo-server                168 Mi -> 256Mi   (see its block above)
+#   server                      34 Mi ->  64Mi
+#   dex-server                  30 Mi ->  64Mi
+#   applicationset-controller   30 Mi ->  64Mi
+#   notifications-controller    22 Mi ->  64Mi
+#   redis                        7 Mi ->  32Mi
+# Total declared: ~928 Mi.
+#
+# Memory only. CPU sits at 1-3m per pod against 12 cores per node, so a CPU
+# request would be noise — memory is the constraint on this cluster.
+#
+# NOT GitOps-managed (see the header): this file only takes effect on the
+# next `helm upgrade --install`. Nothing changes until you run it.
+controller:
+  resources:
+    requests:
+      memory: 384Mi
+    limits:
+      memory: 1Gi
+
+dex:
+  resources:
+    requests:
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+applicationSet:
+  resources:
+    requests:
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+notifications:
+  resources:
+    requests:
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+redis:
+  resources:
+    requests:
+      memory: 32Mi
+    limits:
+      memory: 128Mi

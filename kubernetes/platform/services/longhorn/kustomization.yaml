@@ -10,6 +10,10 @@ resources:
   # NetworkPolicy blocks it. See the file for why it lives here and not next
   # to the ServiceMonitor.
   - prometheus-scrape-policy.yaml
+  # Memory-request floor for the Longhorn pods the chart cannot size —
+  # including instance-manager, which is created at runtime and so is
+  # reachable by nothing else. See the file for the known gap.
+  - limitrange.yaml
 
 generators:
   - ksops-generator.yaml

@@ -1,0 +1,47 @@
+# A memory-request floor for every Longhorn pod the chart cannot size.
+#
+# WHY A LIMITRANGE AND NOT MORE HELM VALUES. Longhorn 1.13 exposes
+# `resources` for exactly two components (longhornManager and
+# longhornGlobalManager — set in values.yaml). Everything else gets nothing:
+#   - csi-attacher / csi-provisioner / csi-resizer / csi-snapshotter,
+#     longhorn-csi-plugin, node-driver-registrar, longhorn-ui,
+#     longhorn-driver-deployer, engine-image: 3-18 Mi each, no chart knob.
+#   - instance-manager (786 Mi measured — the big one): created at RUNTIME
+#     by longhorn-manager, not from a chart template. No manifest exists to
+#     patch and no Helm value reaches it; the only resource setting Longhorn
+#     offers it is `guaranteedInstanceManagerCPU`, a CPU percentage with no
+#     memory equivalent in 1.13 (checked, not assumed).
+# A LimitRange is the only mechanism that applies to runtime-created pods,
+# which is why it exists as a plain manifest rather than more values.
+#
+# KNOWN GAP — read this before doing capacity math. 32Mi is a floor, not the
+# truth. instance-manager really uses ~786 Mi and will still be declared at
+# 32Mi, so roughly 750 Mi per node stays invisible to the scheduler.
+# Subtract it by hand when sizing new vclusters.
+#
+# 32Mi rather than 786Mi because a LimitRange applies ONE default to every
+# container in the namespace: sizing it for instance-manager would also
+# reserve 786 Mi for each of the ~33 containers that actually use 3-18 Mi,
+# burning ~25 GiB of schedulable capacity to close a 2 GiB blind spot. And
+# 32Mi rather than 64Mi because declaring a request CONSUMES schedulable
+# capacity: the largest of these containers measures 18 Mi, so 32Mi gives
+# ~2x headroom while reserving half as much. Over 33 containers that is the
+# difference between 1.0 and 2.1 GiB of the cluster spent on padding.
+#
+# defaultRequest only, no `default` (limit): these pods become Burstable
+# with no ceiling, which is what a storage layer wants.
+#
+# Applies at pod CREATION only. Existing pods keep their current spec until
+# something recreates them (next Longhorn upgrade, node reboot, drain) — so
+# the requests stay at zero until then. Nothing needs forcing; a rolling
+# restart of longhorn-system would only cause volume churn for no gain.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: longhorn-memory-request-floor
+  namespace: longhorn-system
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        memory: 32Mi

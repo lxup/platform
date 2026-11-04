@@ -1,0 +1,72 @@
+# The two capacity alerts the stack does not ship — plus the reason the ones
+# it DOES ship were never seen.
+#
+# WHY THIS FILE EXISTS. On 2026-11-04 the cluster's memory requests sat at
+# 69.2% of allocatable against an N-1 threshold of 66.7% (3 nodes): losing
+# any single node left its pods unschedulable, and a `kubectl drain` for a
+# Talos upgrade would have stranded them. kube-prometheus-stack had caught
+# this on its own — KubeMemoryOvercommit had been firing continuously since
+# 2026-11-02 10:44 UTC — but the Alertmanager route is an explicit
+# `alertname=~` allowlist and that rule was not in it. The cluster had been
+# saying so for two days into a receiver named "null".
+#
+# So the fix was mostly NOT writing rules. The allowlist in
+# alertmanager-config.sops.yaml is extended in the same commit; a rule added
+# here without a matching entry there is a rule nobody will ever see.
+#
+# ALREADY COVERED — deliberately not duplicated here:
+#   KubeMemoryOvercommit      the N-1 capacity check itself. Fires when
+#                             requests exceed (nodes-1)/nodes of total
+#                             allocatable, which is exactly the right
+#                             question. Now in the allowlist.
+#   NodeMemoryHighUtilization real pressure (>90% of RAM in use). The other
+#                             half of the picture: requests are a promise,
+#                             this is what is actually happening. Now in the
+#                             allowlist.
+#   KubePodCrashLooping       was already in the allowlist.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: capacity
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack # the Prometheus instance selects on this
+spec:
+  groups:
+    - name: capacity.scheduling
+      rules:
+        # kube_pod_status_unschedulable would be the natural metric, but
+        # this kube-state-metrics build does not emit it (checked: 0 series
+        # against 900 for kube_pod_status_phase). Pending is the signal we
+        # actually have.
+        #
+        # 15m: a pod is legitimately Pending for a while during an image
+        # pull or a Longhorn volume attach, so firing sooner would cry on
+        # every normal deploy. Anything still Pending after 15 minutes is
+        # not waiting, it is stuck — and with requests at the N-1 line, "no
+        # node has room" is now the most likely reason.
+        - alert: PodStuckPending
+          expr: kube_pod_status_phase{phase="Pending"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been Pending for 15 minutes"
+            description: "It is not being scheduled. With memory requests near the N-1 limit the usual cause is that no node has room left — check KubeMemoryOvercommit."
+        # max_over_time rather than a bare `== 1`: kube-state-metrics drops
+        # this series as soon as the pod is replaced, so an instant query
+        # can miss an OOMKill that happened between two scrapes. The 15m
+        # window makes it stick long enough to fire and notify.
+        #
+        # Worth having even though nothing is OOMKilled today: this is the
+        # alert that tells you a memory limit set from today's measurements
+        # has been outgrown.
+        - alert: PodOOMKilled
+          expr: max_over_time(kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}[15m]) == 1
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} container {{ $labels.container }} was OOMKilled"
+            description: "The container hit its memory limit and was killed. Either the limit is too low for what it now does, or the workload has a leak."

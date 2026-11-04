@@ -31,3 +31,34 @@ defaultBackupStore:
   # clients that require one.
   backupTarget: s3://homelab@auto/
   backupTargetCredentialSecret: longhorn-backup-target
+
+# Memory requests for the only two components this chart lets us size.
+#
+# WHY. Every Longhorn pod shipped with zero memory requests — 31 pods, all
+# BestEffort except instance-manager (Burstable, but on CPU only). Eviction
+# was never the real risk: they all carry priorityClass `longhorn-critical`
+# (priority 1000000000), and node-pressure eviction ranks by priority, so
+# they are among the LAST to go. The risk is the SCHEDULER, which sees
+# ~3.1 GiB of real Longhorn+ArgoCD usage as free space and overpacks nodes
+# accordingly. With tenants being added, that is precisely how a node goes
+# from "fine" to evicting.
+#
+# Calibrated on measured steady usage (max across the 3 nodes), not guessed:
+#   longhorn-manager        256 Mi -> 320Mi
+#   longhorn-global-manager  37 Mi ->  64Mi
+#
+# Requests only, deliberately no memory limit. An OOMKill of the manager
+# takes down the control plane for every volume on that node, and these are
+# exactly the pods whose footprint grows with the cluster's Pod count — the
+# chart says so for the global manager (cluster-wide Pod informer cache). A
+# limit here would convert organic growth into an outage. Revisit both
+# numbers as the tenant count grows.
+longhornManager:
+  resources:
+    requests:
+      memory: 320Mi
+
+longhornGlobalManager:
+  resources:
+    requests:
+      memory: 64Mi
