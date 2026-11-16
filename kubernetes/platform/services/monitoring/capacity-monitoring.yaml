@@ -54,16 +54,28 @@ spec:
           annotations:
             summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been Pending for 15 minutes"
             description: "It is not being scheduled. With memory requests near the N-1 limit the usual cause is that no node has room left — check KubeMemoryOvercommit."
-        # max_over_time rather than a bare `== 1`: kube-state-metrics drops
-        # this series as soon as the pod is replaced, so an instant query
-        # can miss an OOMKill that happened between two scrapes. The 15m
-        # window makes it stick long enough to fire and notify.
+        # Two conditions joined, and the join is the whole point.
+        # last_terminated_reason is a STATE, not an event: it reports how the
+        # container last died and keeps reporting it for as long as the pod
+        # exists. Matching on it alone therefore fires forever, which is what
+        # the first version of this rule did — web-app was OOMKilled once on
+        # 2026-11-15 at 19:05 and the alert was still firing a day later,
+        # re-notifying every 12h per the Alertmanager repeat_interval. It read
+        # as several incidents when there had been one.
         #
-        # Worth having even though nothing is OOMKilled today: this is the
-        # alert that tells you a memory limit set from today's measurements
-        # has been outgrown.
+        # increase(restarts_total[15m]) supplies the event half: non-zero only
+        # while a restart sits inside the window, so the alert resolves ~15
+        # minutes after the kill instead of never. The reason series then says
+        # whether that restart was an OOM rather than a crash.
+        #
+        # Checked against live Prometheus before committing, unlike the first
+        # attempt: this expression returns 0 series now, and 1 series when
+        # evaluated at 2026-11-15T19:10Z, five minutes after the kill.
         - alert: PodOOMKilled
-          expr: max_over_time(kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}[15m]) == 1
+          expr: |
+            increase(kube_pod_container_status_restarts_total[15m]) > 0
+              and on (namespace, pod, container)
+                  kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
           for: 1m
           labels:
             severity: warning
